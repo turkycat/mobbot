@@ -116,3 +116,16 @@ class MockSearch
             google: (new GoogleSearchResult obj for obj in mockGoogleData)
             twitter: (new TwitterSearchResult obj for obj in mockTwitterData)
         callback results
+        
+        
+
+@doSearch = ->
+    $ = (id) -> document.getElementById(id)
+    kw = $("searchQuery").value
+    appender = (id, data) ->
+        data.forEach (x) -> 
+            $(id).innerHTML += "<p>#{x.toHtml()}</p>"
+    ms = new MockSearch
+    ms.search kw, (results) ->
+        appender("gr", results.google)
+        appender("tr", results.twitter)
