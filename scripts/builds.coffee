@@ -21,7 +21,7 @@ module.exports = (robot) ->
             @pattern = {
                 text: ""
                 #fallback: "Attachment fallback"
-                color: "#36a64f"
+                color: ""
                 fields: [{
                     title: "Status"
                     value: ""
@@ -52,8 +52,7 @@ module.exports = (robot) ->
                 branch_pattern = /// <td>(.+)\.#{branch_root_address}#{query.branch}\.(.+)buildguid=(.+)">(.*) ///g
                 pattern_matches = body.match branch_pattern
                 if pattern_matches
-                    #[0..pattern_matches.length - 1].map (i) -> res.send "#{i}: #{pattern_matches[i]}"
-                    
+                
                     query.build_identities = []
                     num = if query.count < pattern_matches.length then query.count else pattern_matches.length
                     query.response.send "Found #{pattern_matches.length} results. Retrieving status of " + if num > 1 then "#{num} builds, starting with most recent." else "most recent build."
@@ -65,7 +64,6 @@ module.exports = (robot) ->
                         build = new BuildIdentity buildid, date, guid
                         query.build_identities.push build
                     
-                    query.response.send "Parsed #{query.build_identities.length} results into build identities"
                     fetch_build_status query
                 else
                     query.response.send "Unable to retrieve build listing."
@@ -83,36 +81,39 @@ module.exports = (robot) ->
                         query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
                         return
                         
-                    builds = body.match /<td>(x86fre|woafre|ARM64FRE|amd64fre)(.*)/gi
-                    if builds
-                        [0..builds.length - 1].map (j) ->
-                            if builds[j]                            
-                                table_elements = builds[j].split /\<td\>/g      #split at each new <td>, removing the tag in the process
-                                
-                                [1..table_elements.length - 1].map (j) ->       #remove </td> from each string. start at 1 because the first string will be empty due to split
-                                    if table_elements[j]
-                                        table_elements[j] = table_elements[j].replace /\<\/td\>/, ""
-                                
-                                build_status = new BuildStatus table_elements[1], table_elements[3], table_elements[5]
-                                build_status.color = "#ffff66" if table_elements[3] == "Started"
-                                build_status.color = "#ff3333" if table_elements[3] == "Failed"
-                                
-                                query.build_identities[i].status.push build_status
-                        
-                        query.response.send "Parsed #{query.build_identities[i].status.length} build statuses for #{i}'th identity."
-                        #process_build_results botres, query TODO callback
-                    else
-                        query.response.send "Unable to retrieve build status."
+                    jsdom.env body, (err, window) ->
+                        if err
+                            console.error err
+                            return
+
+                        #get the necessary elements using jquery
+                        $ = require("jquery")(window)
+                        rows = $(".rgRow, .rgAltRow")
+                        rows.each (index) ->
+                            flavor = $(this).children().eq(0).text()
+                            status = $(this).children().eq(2).text()
+                            restarts = $(this).children().eq(4).text()
+                            build_status = new BuildStatus flavor, status, restarts
+                            switch status
+                                when "Started" then build_status.color = "#ffff66"
+                                when "Failed" then build_status.color = "#ff3333"
+                                else build_status.color = "#36a64f"
+                            
+                            query.build_identities[i].status.push build_status
+                            
+                        query.callback query
     
     
     print_results = (query) ->
         [0..query.build_identities.length - 1].map (i) ->
-            message = "#{i}: *date*: #{query.build_identities[i].date}  |  *buildid*: #{query.build_identities[i].buildid}  |  *guid*: #{query.build_identities[i].guid}\n"
+            message = "*date*: #{query.build_identities[i].date}  |  *buildid*: #{query.build_identities[i].buildid}  |  *guid*: #{query.build_identities[i].guid}\n"
             message += "#{query.build_identities[i].web_address}\n"
             
             query.build_identities[i].status.map (status) ->
                 #status = query.build_identities[i].status[j]
-                message += "#{status.flavor}: #{status.status}   |   *Restarts*: #{status.restarts}\n"
+                message += "#{status.flavor}: "
+                message += if status.status is "Failed" then "*#{status.status}*" else "#{status.status}"
+                message += "  |   *Restarts*: #{status.restarts}\n"
         
             query.response.send message
     
@@ -134,6 +135,6 @@ module.exports = (robot) ->
     
     robot.hear /^builds? ?(.{2}\d) ?(\d*){1}/i, (response) ->
         branch = response.match[1]
-        count = if res.match[2] then response.match[2] else "1"
+        count = if response.match[2] then response.match[2] else "1"
         response.send "Fetching builds for #{branch}"
         fetch_builds new BuildQuery response, branch, count, print_results

@@ -18,6 +18,3 @@ module.exports = (robot) ->
     robot.hear /jesse/i, (res) ->
         res.send "Fetching Jesse!"
         fetchJesse res
-        
-    robot.hear /builds (.*)/i, (res) ->
-        res.send "Heard #{res.match[0]}"
