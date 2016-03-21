@@ -10,10 +10,14 @@ module.exports = (robot) ->
                     res.send "Request didn't come back HTTP 200 :("
                     return
                     
-                arr = body.split "\n"
-                [0..arr.length].map (i) -> botres.send "#{i}: #{arr[i]}"
+                #arr = body.split "\n"
+                #[0..arr.length].map (i) -> botres.send "#{i}: #{arr[i]}"
+                botres.send "got back: #{body}"
                 
     
     robot.hear /jesse/i, (res) ->
         res.send "Fetching Jesse!"
         fetchJesse res
+        
+    robot.hear /builds (.*)/i, (res) ->
+        res.send "Heard #{res.match[0]}"
