@@ -37,6 +37,7 @@ module.exports = (robot) ->
             @date = date
             @guid = guid
             @web_address = web_address
+            @fetched = false
             @status = []
     
     fetch_builds = (query) ->
@@ -101,7 +102,9 @@ module.exports = (robot) ->
                             
                             query.build_identities[i].status.push build_status
                             
-                        query.callback query
+                        query.build_identities[i].fetched = true
+                        cb = query.build_identities.reduce (a, b) -> a && b.fetched
+                        query.callback query if cb
     
     
     print_results = (query) ->
