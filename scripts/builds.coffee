@@ -4,6 +4,7 @@ module.exports = (robot) ->
     windowsbuild_root_address = "http://windowsbuild/status/"
     windowsbuild_branch_address = "Builds.aspx?buildquery=#{branch_root_address}"
     windowsbuild_status_address = "Timebuilds.aspx?buildguid="
+    #buildsvc_root_address = "http://buildsvc/BuildDetails.aspx?guid=" #interestingly, the GUIDs are unique to the site
     
     class BuildQuery
         constructor: (response, branch, count, callback) ->
@@ -111,6 +112,7 @@ module.exports = (robot) ->
         [0..query.build_identities.length - 1].map (i) ->
             message = "*date*: #{query.build_identities[i].date}  |  *buildid*: #{query.build_identities[i].buildid}  |  *guid*: #{query.build_identities[i].guid}\n"
             message += "#{query.build_identities[i].web_address}\n"
+            #message += "#{buildsvc_root_address}#{query.build_identities[i].guid}\n" #this doesn't work, guid is unique to site.
             
             query.build_identities[i].status.map (status) ->
                 #status = query.build_identities[i].status[j]
