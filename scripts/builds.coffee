@@ -68,7 +68,7 @@ module.exports = (robot) ->
         robot.http(web_address)
             .get() (err, res, body) ->
                 if err || res.statusCode isnt 200
-                    query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
+                    query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)\n#{err}"
                     return
                     
                 parse_builds query, body
@@ -104,7 +104,7 @@ module.exports = (robot) ->
             robot.http(web_address)
                 .get() (err, res, body) ->
                     if err or res.statusCode isnt 200
-                        query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
+                        query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)\n#{err}"
                         return
                         
                     parse_build_status query, i, body

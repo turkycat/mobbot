@@ -6,13 +6,17 @@ class FakeServerRequest
         @path = path
     
     get: (callback) ->
-        @body = exports.readFileSync @path
+        try
+            @body = exports.readFileSync @path
+        catch err
+            @err = err
+            
         
         #this is some black magic right here. get returns a function that that is invoked with 'this'.
         # the returned function returns a function that invokes a callback.
         (callback) =>
             if callback
-                callback null, new FakeServerResponse, @body
+                if !err then callback null, new FakeServerResponse, @body else callback err, null, null
             @
             
             
