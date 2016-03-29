@@ -5,17 +5,17 @@
 #
 # this script also has a testing mode in which the web pages are loaded from a text file and should be ran directly
 #   in the console by first setting DEBUG_MODE to 'true' and call ../test_files/testbuildscript.cmd
-#   you must have a copy of the correct pages saved to paths given by $DEBUG.builds_path and $DEBUG.guid_path
+#   you must have a copy of the correct pages saved to paths given by $DEBUG.builds_path and $DEBUG.status_path
 #
 
 
 #set DEBUG_MODE to true and run this compiled script with node, see top of script for more information.
-DEBUG_MODE = true
+DEBUG_MODE = false
 $DEBUG = null
 if DEBUG_MODE
     $DEBUG = require "../test_files/dbgbot"
     $DEBUG.builds_path = "../test_files/builds.txt"
-    $DEBUG.guid_path = "../test_files/buildguid.txt"
+    $DEBUG.status_path = "../test_files/buildstatus.txt"
 
 module.exports = (robot) ->
     
@@ -86,23 +86,27 @@ module.exports = (robot) ->
                 
             _$ = $(window)
             rows = _$(".rgRow, .rgAltRow")
-            num = if query.count < rows.length then query.count else rows.length
-            query.response.send "Found #{rows.length} results. Retrieving status of " + if num > 1 then "#{num} builds, starting with most recent." else "most recent build."
+            num_to_fetch = if query.count < rows.length then query.count else rows.length
+            query.response.send "Found #{rows.length} results. Retrieving status of " + if num_to_fetch > 1 then "#{num_to_fetch} official builds, starting with most recent." else "most recent official build."
             
             query.build_identities = []
-            [0..num - 1].map (i) ->
-                elements = _$(rows[i]).find "td"
-                full_label = _$(elements[0]).text()
-                timebuild_html = _$(elements[1]).html()
+            rows.each (i) ->
+                elements = _$( this ).find "td"
+                full_label = _$( elements[0] ).text()
+                timebuild_html = _$( elements[1] ).html()
                 
                 build_id = full_label.match /\d{5}\.\d{4}/
                 date = full_label.match /\d{6}\-\d{4}/
                 guid = timebuild_html.match /.{8}\-.{4}\-.{4}\-.{4}\-.{12}/
-                owner = _$(elements[3]).text()
+                owner = _$( elements[3] ).text()
                 build = new BuildIdentity build_id, date, guid, owner
-                query.build_identities.push build
+                query.build_identities.push build if build.is_official
+                query.build_identities.length != num_to_fetch
                 
-            fetch_build_status query
+            if query.build_identities.length < 1
+                query.response.send "Unable to locate any builds with the specified owner. :("
+            else
+                fetch_build_status query
                     
                     
     fetch_build_status = (query) ->        
@@ -126,13 +130,12 @@ module.exports = (robot) ->
                 console.error err
                 return
 
-            #get the necessary elements using jquery
             _$ = $(window)
             rows = _$(".rgRow, .rgAltRow")
             rows.each (index) ->
-                flavor = _$(this).children().eq(0).text()
-                status = _$(this).children().eq(2).text()
-                restarts = _$(this).children().eq(4).text()
+                flavor = _$( this ).children().eq(0).text()
+                status = _$( this ).children().eq(2).text()
+                restarts = _$( this ).children().eq(4).text()
                 build_status = new BuildStatus flavor, status, restarts
                 switch status
                     when "Started" then build_status.color = "#ffff66"
