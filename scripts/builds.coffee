@@ -5,6 +5,7 @@
 #
 # this script also has a testing mode in which the web pages are loaded from a text file and should be ran directly
 #   in the console by first setting DEBUG_MODE to 'true' and call ../test_files/testbuildscript.cmd
+#   you must have a copy of the correct pages saved to paths given by $DEBUG.builds_path and $DEBUG.guid_path
 #
 
 
@@ -13,6 +14,8 @@ DEBUG_MODE = true
 $DEBUG = null
 if DEBUG_MODE
     $DEBUG = require "../test_files/dbgbot"
+    $DEBUG.builds_path = "../test_files/builds.txt"
+    $DEBUG.guid_path = "../test_files/buildguid.txt"
 
 module.exports = (robot) ->
     
@@ -60,7 +63,7 @@ module.exports = (robot) ->
     
     fetch_builds = (query) ->
         web_address = "#{windowsbuild_root_address}#{windowsbuild_branch_address}#{query.branch}"
-        web_address = "../test_files/builds.txt" if DEBUG_MODE
+        web_address = $DEBUG.builds_path if DEBUG_MODE
         
         robot.http(web_address)
             .get() (err, res, body) ->
@@ -96,7 +99,7 @@ module.exports = (robot) ->
         [0..query.build_identities.length - 1].map (i) ->
             web_address = "#{windowsbuild_root_address}#{windowsbuild_status_address}#{query.build_identities[i].guid}"
             query.build_identities[i].web_address = web_address
-            web_address = "../test_files/buildguid.txt" if DEBUG_MODE
+            web_address = $DEBUG.guid_path if DEBUG_MODE
             
             robot.http(web_address)
                 .get() (err, res, body) ->
