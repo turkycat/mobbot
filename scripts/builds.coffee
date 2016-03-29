@@ -1,4 +1,23 @@
+#
+# this script will load build identities from winbuilds and determine the current status for each flavor of build.
+# the intention of this script is to accept queries from Slack and return the results to Slack. In this mode, the 
+#   the script is loaded by Hubot.
+#
+# this script also has a testing mode in which the web pages are loaded from a text file and should be ran directly
+#   in the console by first compiling this script (and ../test_files/logoutput.coffee) and then using the command
+#   'node builds.js'. you must have a copy of the correct pages saved to ../testfiles/
+#
+
+TESTING_LOAD_FROM_FILE = true
+fs = null
+log = null
+if TESTING_LOAD_FROM_FILE
+    fs = require "fs"
+    log = require "../test_files/logoutput"
+
 module.exports = (robot) ->
+    
+    
     jsdom = require "jsdom"
     branch_root_address = "rs1_onecore_stacksp_mobcon_"
     windowsbuild_root_address = "http://windowsbuild/status/"
@@ -44,31 +63,40 @@ module.exports = (robot) ->
     fetch_builds = (query) ->
         web_address = "#{windowsbuild_root_address}#{windowsbuild_branch_address}#{query.branch}"
         #query.response.send web_address
-
-        robot.http(web_address)
-            .get() (err, res, body) ->
-                if err || res.statusCode isnt 200
-                    query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
-                    return
-                
-                branch_pattern = /// <td>(.+)\.#{branch_root_address}#{query.branch}\.(.+)buildguid=(.+)">(.*) ///g
-                pattern_matches = body.match branch_pattern
-                if pattern_matches
-                
-                    query.build_identities = []
-                    num = if query.count < pattern_matches.length then query.count else pattern_matches.length
-                    query.response.send "Found #{pattern_matches.length} results. Retrieving status of " + if num > 1 then "#{num} builds, starting with most recent." else "most recent build."
-                    [0..num - 1].map (i) ->
-                        #if pattern_matches[i]
-                        buildid = pattern_matches[i].match /\d{5}\.\d{4}/
-                        date = pattern_matches[i].match /\d{6}\-\d{4}/
-                        guid = pattern_matches[i].match /.{8}\-.{4}\-.{4}\-.{4}\-.{12}/
-                        build = new BuildIdentity buildid, date, guid
-                        query.build_identities.push build
+        
+        if TESTING_LOAD_FROM_FILE
+            body = fs.readFileSync "../test_files/builds.txt"
+            .toString()
+            parse_builds query, body
+        else
+            robot.http(web_address)
+                .get() (err, res, body) ->
+                    if err || res.statusCode isnt 200
+                        query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
+                        return
+                        
+                    parse_builds query, body
                     
-                    fetch_build_status query
-                else
-                    query.response.send "Unable to retrieve build listing."
+                
+    parse_builds = (query, body) ->
+        branch_pattern = /// <td>(.+)\.#{branch_root_address}#{query.branch}\.(.+)buildguid=(.+)">(.*) ///g
+        pattern_matches = body.match branch_pattern
+        if pattern_matches
+        
+            query.build_identities = []
+            num = if query.count < pattern_matches.length then query.count else pattern_matches.length
+            query.response.send "Found #{pattern_matches.length} results. Retrieving status of " + if num > 1 then "#{num} builds, starting with most recent." else "most recent build."
+            [0..num - 1].map (i) ->
+                #if pattern_matches[i]
+                buildid = pattern_matches[i].match /\d{5}\.\d{4}/
+                date = pattern_matches[i].match /\d{6}\-\d{4}/
+                guid = pattern_matches[i].match /.{8}\-.{4}\-.{4}\-.{4}\-.{12}/
+                build = new BuildIdentity buildid, date, guid
+                query.build_identities.push build
+            
+            fetch_build_status query
+        else
+            query.response.send "Unable to retrieve build listing."
                     
                     
     fetch_build_status = (query) ->        
@@ -77,36 +105,45 @@ module.exports = (robot) ->
             query.build_identities[i].web_address = web_address
             #query.response.send web_address
             
-            robot.http(web_address)
-                .get() (err, res, body) ->
-                    if err or res.statusCode isnt 200
-                        query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
-                        return
-                        
-                    jsdom.env body, (err, window) ->
-                        if err
-                            console.error err
+            if TESTING_LOAD_FROM_FILE
+                body = fs.readFileSync "../test_files/buildguid.txt"
+                .toString()
+                parse_build_status query, i, body
+            else
+                robot.http(web_address)
+                    .get() (err, res, body) ->
+                        if err or res.statusCode isnt 200
+                            query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
                             return
+                            
+                        parse_build_status query, i, body
+                        
+                        
+    parse_build_status = (query, i, body) ->
+        jsdom.env body, (err, window) ->
+            if err
+                console.error err
+                return
 
-                        #get the necessary elements using jquery
-                        $ = require("jquery")(window)
-                        rows = $(".rgRow, .rgAltRow")
-                        rows.each (index) ->
-                            flavor = $(this).children().eq(0).text()
-                            status = $(this).children().eq(2).text()
-                            restarts = $(this).children().eq(4).text()
-                            build_status = new BuildStatus flavor, status, restarts
-                            switch status
-                                when "Started" then build_status.color = "#ffff66"
-                                when "Failed" then build_status.color = "#ff3333"
-                                else build_status.color = "#36a64f"
-                            
-                            query.build_identities[i].status.push build_status
-                            
-                        query.build_identities[i].fetched = true
-                        cb = query.build_identities.reduce (a, b) -> a && b.fetched
-                        query.callback query if cb
-    
+            #get the necessary elements using jquery
+            $ = require("jquery")(window)
+            rows = $(".rgRow, .rgAltRow")
+            rows.each (index) ->
+                flavor = $(this).children().eq(0).text()
+                status = $(this).children().eq(2).text()
+                restarts = $(this).children().eq(4).text()
+                build_status = new BuildStatus flavor, status, restarts
+                switch status
+                    when "Started" then build_status.color = "#ffff66"
+                    when "Failed" then build_status.color = "#ff3333"
+                    else build_status.color = "#36a64f"
+                
+                query.build_identities[i].status.push build_status
+                
+            query.build_identities[i].fetched = true
+            cb = query.build_identities.reduce (a, b) -> a && b.fetched
+            query.callback query if cb
+            
     
     print_results = (query) ->
         [0..query.build_identities.length - 1].map (i) ->
@@ -136,10 +173,17 @@ module.exports = (robot) ->
         #    message: botres.message
         #    content: build_report_content
         #    channel: botres.message.room
+        
     
-    
-    robot.hear /^builds? ?(.{2}\d) ?(\d*){1}/i, (response) ->
-        branch = response.match[1]
-        count = if response.match[2] then response.match[2] else "1"
-        response.send "Fetching builds for #{branch}"
-        fetch_builds new BuildQuery response, branch, count, print_results
+    if TESTING_LOAD_FROM_FILE
+        log.send "Fetching builds from file"
+        fetch_builds new BuildQuery log, "dv1", 1, print_results
+    else
+        robot.hear /^builds? ?(.{2}\d) ?(\d*){1}/i, (response) ->
+            branch = response.match[1]
+            count = if response.match[2] then response.match[2] else "1"
+            response.send "Fetching builds for #{branch}"
+            fetch_builds new BuildQuery response, branch, count, print_results
+            
+if TESTING_LOAD_FROM_FILE
+    module.exports null

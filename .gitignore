@@ -3,3 +3,5 @@ node_modules
 .hubot_history
 log.txt
 *.swp
+*.js
+test_files/*.txt
