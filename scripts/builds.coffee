@@ -4,26 +4,25 @@
 #   the script is loaded by Hubot.
 #
 # this script also has a testing mode in which the web pages are loaded from a text file and should be ran directly
-#   in the console by first compiling this script (and ../test_files/logoutput.coffee) and then using the command
+#   in the console by first compiling this script (and ../test_files/dbgbot.coffee) and then using the command
 #   'node builds.js'. you must have a copy of the correct pages saved to ../testfiles/
 #
 
-TESTING_LOAD_FROM_FILE = true
-fs = null
-log = null
-if TESTING_LOAD_FROM_FILE
-    fs = require "fs"
-    log = require "../test_files/logoutput"
+
+#set DEBUG_MODE to true and run this compiled script with node, see top of script for more information.
+DEBUG_MODE = true
+$DEBUG = null
+if DEBUG_MODE
+    $DEBUG = require "../test_files/dbgbot"
 
 module.exports = (robot) ->
-    
     
     jsdom = require "jsdom"
     branch_root_address = "rs1_onecore_stacksp_mobcon_"
     windowsbuild_root_address = "http://windowsbuild/status/"
     windowsbuild_branch_address = "Builds.aspx?buildquery=#{branch_root_address}"
     windowsbuild_status_address = "Timebuilds.aspx?buildguid="
-    #buildsvc_root_address = "http://buildsvc/BuildDetails.aspx?guid=" #interestingly, the GUIDs are unique to the site
+    #TODO buildsvc_root_address = "http://buildsvc/BuildDetails.aspx?guid=" #interestingly, the GUIDs are unique to the site
     
     class BuildQuery
         constructor: (response, branch, count, callback) ->
@@ -62,20 +61,15 @@ module.exports = (robot) ->
     
     fetch_builds = (query) ->
         web_address = "#{windowsbuild_root_address}#{windowsbuild_branch_address}#{query.branch}"
-        #query.response.send web_address
+        web_address = "../test_files/builds.txt" if DEBUG_MODE
         
-        if TESTING_LOAD_FROM_FILE
-            body = fs.readFileSync "../test_files/builds.txt"
-            .toString()
-            parse_builds query, body
-        else
-            robot.http(web_address)
-                .get() (err, res, body) ->
-                    if err || res.statusCode isnt 200
-                        query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
-                        return
-                        
-                    parse_builds query, body
+        robot.http(web_address)
+            .get() (err, res, body) ->
+                if err || res.statusCode isnt 200
+                    query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
+                    return
+                    
+                parse_builds query, body
                     
                 
     parse_builds = (query, body) ->
@@ -103,20 +97,15 @@ module.exports = (robot) ->
         [0..query.build_identities.length - 1].map (i) ->
             web_address = "#{windowsbuild_root_address}#{windowsbuild_status_address}#{query.build_identities[i].guid}"
             query.build_identities[i].web_address = web_address
-            #query.response.send web_address
+            web_address = "../test_files/buildguid.txt" if DEBUG_MODE
             
-            if TESTING_LOAD_FROM_FILE
-                body = fs.readFileSync "../test_files/buildguid.txt"
-                .toString()
-                parse_build_status query, i, body
-            else
-                robot.http(web_address)
-                    .get() (err, res, body) ->
-                        if err or res.statusCode isnt 200
-                            query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
-                            return
-                            
-                        parse_build_status query, i, body
+            robot.http(web_address)
+                .get() (err, res, body) ->
+                    if err or res.statusCode isnt 200
+                        query.response.send "DOES NOT COMPUTE :( (an error occurred with the http request)"
+                        return
+                        
+                    parse_build_status query, i, body
                         
                         
     parse_build_status = (query, i, body) ->
@@ -175,15 +164,16 @@ module.exports = (robot) ->
         #    channel: botres.message.room
         
     
-    if TESTING_LOAD_FROM_FILE
-        log.send "Fetching builds from file"
-        fetch_builds new BuildQuery log, "dv1", 1, print_results
+    if DEBUG_MODE
+        $DEBUG.send "Fetching builds from file"
+        fetch_builds new BuildQuery $DEBUG, "dv1", 1, print_results
     else
         robot.hear /^builds? ?(.{2}\d) ?(\d*){1}/i, (response) ->
             branch = response.match[1]
             count = if response.match[2] then response.match[2] else "1"
             response.send "Fetching builds for #{branch}"
             fetch_builds new BuildQuery response, branch, count, print_results
-            
-if TESTING_LOAD_FROM_FILE
-    module.exports null
+
+#invoke the function we just set to module.exports with the $DEBUG object as the robot param
+if DEBUG_MODE
+    module.exports $DEBUG
