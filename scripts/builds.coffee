@@ -185,8 +185,8 @@ module.exports = (robot) ->
     else
         robot.hear /^builds? ?(.{2}\d) ?(\d*){1}/i, (response) ->
             branch = response.match[1]
-            count = if response.match[2] then response.match[2] else "1"
-            response.send "Fetching builds for #{branch}"
+            count = if response.match[2] then parseInt response.match[2] else 1
+            response.send "Fetching official builds for #{branch}"
             fetch_builds new BuildQuery response, branch, count, print_results
 
 #invoke the function we just set to module.exports with the $DEBUG object as the robot param
