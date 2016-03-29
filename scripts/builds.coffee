@@ -4,8 +4,7 @@
 #   the script is loaded by Hubot.
 #
 # this script also has a testing mode in which the web pages are loaded from a text file and should be ran directly
-#   in the console by first compiling this script (and ../test_files/dbgbot.coffee) and then using the command
-#   'node builds.js'. you must have a copy of the correct pages saved to ../testfiles/
+#   in the console by first setting DEBUG_MODE to 'true' and call ../test_files/testbuildscript.cmd
 #
 
 
