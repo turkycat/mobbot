@@ -20,10 +20,12 @@ if DEBUG_MODE
 module.exports = (robot) ->
     
     jsdom = require "jsdom"
+    $ = require "jquery"
     branch_root_address = "rs1_onecore_stacksp_mobcon_"
     windowsbuild_root_address = "http://windowsbuild/status/"
     windowsbuild_branch_address = "Builds.aspx?buildquery=#{branch_root_address}"
     windowsbuild_status_address = "Timebuilds.aspx?buildguid="
+    windowsbuild_official_build_owner = "wincbld"
     #TODO buildsvc_root_address = "http://buildsvc/BuildDetails.aspx?guid=" #interestingly, the GUIDs are unique to the site
     
     class BuildQuery
@@ -53,10 +55,12 @@ module.exports = (robot) ->
             }
             
     class BuildIdentity
-        constructor: (buildid, date, guid, web_address = "") ->
-            @buildid = buildid
+        constructor: (build_id, date, guid, owner, web_address = "") ->
+            @build_id = build_id
             @date = date
             @guid = guid
+            @owner = owner
+            @is_official = owner == windowsbuild_official_build_owner
             @web_address = web_address
             @fetched = false
             @status = []
@@ -75,24 +79,30 @@ module.exports = (robot) ->
                     
                 
     parse_builds = (query, body) ->
-        branch_pattern = /// <td>(.+)\.#{branch_root_address}#{query.branch}\.(.+)buildguid=(.+)">(.*) ///g
-        pattern_matches = body.match branch_pattern
-        if pattern_matches
-        
-            query.build_identities = []
-            num = if query.count < pattern_matches.length then query.count else pattern_matches.length
-            query.response.send "Found #{pattern_matches.length} results. Retrieving status of " + if num > 1 then "#{num} builds, starting with most recent." else "most recent build."
-            [0..num - 1].map (i) ->
-                #if pattern_matches[i]
-                buildid = pattern_matches[i].match /\d{5}\.\d{4}/
-                date = pattern_matches[i].match /\d{6}\-\d{4}/
-                guid = pattern_matches[i].match /.{8}\-.{4}\-.{4}\-.{4}\-.{12}/
-                build = new BuildIdentity buildid, date, guid
-                query.build_identities.push build
+        jsdom.env body, (err, window) ->
+            if err
+                console.error err
+                return
+                
+            _$ = $(window)
+            rows = _$(".rgRow, .rgAltRow")
+            num = if query.count < rows.length then query.count else rows.length
+            query.response.send "Found #{rows.length} results. Retrieving status of " + if num > 1 then "#{num} builds, starting with most recent." else "most recent build."
             
+            query.build_identities = []
+            [0..num - 1].map (i) ->
+                elements = _$(rows[i]).find "td"
+                full_label = _$(elements[0]).text()
+                timebuild_html = _$(elements[1]).html()
+                
+                build_id = full_label.match /\d{5}\.\d{4}/
+                date = full_label.match /\d{6}\-\d{4}/
+                guid = timebuild_html.match /.{8}\-.{4}\-.{4}\-.{4}\-.{12}/
+                owner = _$(elements[3]).text()
+                build = new BuildIdentity build_id, date, guid, owner
+                query.build_identities.push build
+                
             fetch_build_status query
-        else
-            query.response.send "Unable to retrieve build listing."
                     
                     
     fetch_build_status = (query) ->        
@@ -117,12 +127,12 @@ module.exports = (robot) ->
                 return
 
             #get the necessary elements using jquery
-            $ = require("jquery")(window)
-            rows = $(".rgRow, .rgAltRow")
+            _$ = $(window)
+            rows = _$(".rgRow, .rgAltRow")
             rows.each (index) ->
-                flavor = $(this).children().eq(0).text()
-                status = $(this).children().eq(2).text()
-                restarts = $(this).children().eq(4).text()
+                flavor = _$(this).children().eq(0).text()
+                status = _$(this).children().eq(2).text()
+                restarts = _$(this).children().eq(4).text()
                 build_status = new BuildStatus flavor, status, restarts
                 switch status
                     when "Started" then build_status.color = "#ffff66"
@@ -138,7 +148,7 @@ module.exports = (robot) ->
     
     print_results = (query) ->
         [0..query.build_identities.length - 1].map (i) ->
-            message = "*date*: #{query.build_identities[i].date}  |  *buildid*: #{query.build_identities[i].buildid}  |  *guid*: #{query.build_identities[i].guid}\n"
+            message = "*date*: #{query.build_identities[i].date}  |  *build id*: #{query.build_identities[i].build_id}  |  *guid*: #{query.build_identities[i].guid}\n"
             message += "#{query.build_identities[i].web_address}\n"
             #message += "#{buildsvc_root_address}#{query.build_identities[i].guid}\n" #this doesn't work, guid is unique to site.
             
