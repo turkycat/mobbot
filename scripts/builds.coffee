@@ -22,9 +22,11 @@ module.exports = (robot) ->
     #load modules
     jsdom = require "jsdom"
     $ = require "jquery"
-    db = require "./dbmanager"
+    mongo = require "mongodb"
+    .MongoClient
     
     #behave like static variables
+    mongourl = "mongodb://localhost:27017/mobbot"
     branch_root_address = "rs1_onecore_stacksp_mobcon_"
     windowsbuild_root_address = "http://windowsbuild/status/"
     windowsbuild_branch_address = "Builds.aspx?buildquery=#{branch_root_address}"
@@ -157,10 +159,15 @@ module.exports = (robot) ->
     
     
     check_for_state_change = (query) ->
-        db.open_database ( err ) -> 
+    
+        #open the database to check and possibly update the stored values for the retrieved builds
+        mongo.connect mongourl, ( err, database ) ->
             if err
                 console.log err
                 return
+                
+            console.log "database connection opened."
+            collection = database.collection if DEBUG_MODE then "test_builds" else "builds"
             
             collection = "builds"
             collection = "test_builds" if DEBUG_MODE
