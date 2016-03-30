@@ -49,7 +49,8 @@ module.exports = (robot) ->
             @restarts = restarts
             
     class BuildIdentity
-        constructor: (build_id, date, guid, owner, web_address = "") ->
+        constructor: (branch, build_id, date, guid, owner, web_address = "") ->
+            @branch = branch
             @build_id = build_id
             @date = date
             @guid = guid
@@ -88,12 +89,15 @@ module.exports = (robot) ->
                 elements = _$( this ).find "td"
                 full_label = _$( elements[0] ).text()
                 timebuild_html = _$( elements[1] ).html()
+                label_regex = /(\d{5}\.\d{4})\.(.+)\.(\d{6}\-\d{4})/
+                label_matches = label_regex.exec full_label
                 
-                build_id = full_label.match /\d{5}\.\d{4}/
-                date = full_label.match /\d{6}\-\d{4}/
+                build_id = label_matches[1]
+                branch = label_matches[2]
+                date = label_matches[3]
                 guid = timebuild_html.match /.{8}\-.{4}\-.{4}\-.{4}\-.{12}/
                 owner = _$( elements[3] ).text()
-                build = new BuildIdentity build_id, date, guid, owner
+                build = new BuildIdentity branch, build_id, date, guid, owner
                 query.build_identities.push build if build.is_official
                 query.build_identities.length != num_to_fetch
                 
