@@ -10,7 +10,7 @@
 
 
 #set DEBUG_MODE to true and run this compiled script with node, see top of script for more information.
-DEBUG_MODE = false
+DEBUG_MODE = true
 $DEBUG = null
 if DEBUG_MODE
     $DEBUG = require "../test_files/dbgbot"
@@ -19,8 +19,12 @@ if DEBUG_MODE
 
 module.exports = (robot) ->
     
+    #load modules
     jsdom = require "jsdom"
     $ = require "jquery"
+    db = require "./dbmanager"
+    
+    #behave like static variables
     branch_root_address = "rs1_onecore_stacksp_mobcon_"
     windowsbuild_root_address = "http://windowsbuild/status/"
     windowsbuild_branch_address = "Builds.aspx?buildquery=#{branch_root_address}"
@@ -41,18 +45,6 @@ module.exports = (robot) ->
             @flavor = flavor
             @status = status
             @restarts = restarts
-            @pattern = {
-                text: ""
-                #fallback: "Attachment fallback"
-                color: ""
-                fields: [{
-                    title: "Status"
-                    value: ""
-                },{
-                    title: "Restarts"
-                    value: ""
-                }]
-            }
             
     class BuildIdentity
         constructor: (build_id, date, guid, owner, web_address = "") ->
@@ -113,7 +105,7 @@ module.exports = (robot) ->
         [0..query.build_identities.length - 1].map (i) ->
             web_address = "#{windowsbuild_root_address}#{windowsbuild_status_address}#{query.build_identities[i].guid}"
             query.build_identities[i].web_address = web_address
-            web_address = $DEBUG.guid_path if DEBUG_MODE
+            web_address = $DEBUG.status_path if DEBUG_MODE
             
             robot.http(web_address)
                 .get() (err, res, body) ->
@@ -165,14 +157,19 @@ module.exports = (robot) ->
     
     
     check_for_state_change = (query) ->
+        db.open_database ( err ) -> 
+            if err
+                console.log err
+                return
+            
+            collection = "builds"
+            collection = "test_builds" if DEBUG_MODE
+            
+            if DEBUG_MODE
+                db.insert_items query.build_identities[0], collection, ( err, result ) ->
+                    db.close_database()
+        
         #TODO
-        #build_report_content[j].text = table_elements[1]
-        #build_report_content[j].fields[0].value = table_elements[3]
-        #build_report_content[j].fields[1].value = table_elements[5]
-        
-        #build_report_content[j].color = "#ffff66" if table_elements[3] == "Started"
-        #build_report_content[j].color = "#ff3333" if table_elements[3] == "Failed"
-        
         #robot.emit 'slack.attachment',
         #    message: botres.message
         #    content: build_report_content
@@ -181,7 +178,7 @@ module.exports = (robot) ->
     
     if DEBUG_MODE
         $DEBUG.send "Fetching builds from file"
-        fetch_builds new BuildQuery $DEBUG, "dv1", 1, print_results
+        fetch_builds new BuildQuery $DEBUG, "dv1", 1, check_for_state_change
     else
         robot.hear /^builds? ?(.{2}\d) ?(\d*){1}/i, (response) ->
             branch = response.match[1]

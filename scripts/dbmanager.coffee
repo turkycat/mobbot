@@ -19,15 +19,21 @@ root.close_database = () ->
     console.log "database connection closed."
     
     
-root.insert_items = ( items, collection, callback ) ->
-    callback "database is not open", null if !root.db && callback
-    callback "items or collection is not valid", null if !items || !collection
+root.insert_items = ( items, colname, callback ) ->
+    if !root.db && callback
+        console.log "database is not open"
+        return callback "database is not open", null
+    if !items || !colname
+        console.log "items or collection is not valid"
+        return callback "items or collection is not valid", null
     
-    collection = root.db.collection collection
+    collection = root.db.collection colname
     cb = ( err, result ) ->
-        callback err if err && callback
-        console.log "inserted #{result.result.n} items into the #{collection} collection"
-        callback null, result
+        if err
+            callback err if callback
+        else
+            console.log "inserted #{result.result.n} items into the #{colname} collection"
+            callback null, result if callback
         
     if typeof items.length is "undefined"
         collection.insertOne items, cb
@@ -36,6 +42,7 @@ root.insert_items = ( items, collection, callback ) ->
     else if items.length > 1
         collection.insertMany items, cb
     else
+        console.log "invalid item entry, database not modified"
         callback "invalid item entry, database not modified", null if callback
         
         
