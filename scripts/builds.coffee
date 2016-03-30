@@ -58,6 +58,7 @@ module.exports = (robot) ->
             @is_official = owner == windowsbuild_official_build_owner
             @web_address = web_address
             @fetched = false
+            @complete = false
             @status = []
     
     fetch_builds = (query) ->
@@ -135,11 +136,6 @@ module.exports = (robot) ->
                 status = _$( this ).children().eq(2).text()
                 restarts = _$( this ).children().eq(4).text()
                 build_status = new BuildStatus flavor, status, restarts
-                switch status
-                    when "Started" then build_status.color = "#ffff66"
-                    when "Failed" then build_status.color = "#ff3333"
-                    else build_status.color = "#36a64f"
-                
                 query.build_identities[i].status.push build_status
                 
             query.build_identities[i].fetched = true
@@ -174,22 +170,35 @@ module.exports = (robot) ->
             collection = database.collection if DEBUG_MODE then "test_builds" else "builds"
             
             #go through each build identity retrieved and try to find it in the database by guid
-            for identity in query.build_identities
+            for identity in query.build_identities                
                 collection.findOne { "guid": identity.guid }, {}, ( err, doc ) ->
                     if err
                         console.log err.message
                         return
+                        
+                    if doc.complete
+                        console.log "all builds for this identity have stopped. skipping update check"
+                        return
                     
-                    #iterate through the statuses on the returned document looking for changes
+                    #iterate through the statuses on the returned document looking for changes and completeness
                     modified = false
+                    complete = true
                     for doc_status, i in doc.status
+                        if identity.status[i].status == "Started" || identity.status[i].status == "Failed"
+                            complete = false
+                            
                         if doc_status.status != identity.status[i].status
                             modified = true
                             console.log "status for #{identity.build_id}.#{identity.branch}.#{identity.date}:#{doc_status.flavor} changed from #{doc_status.status} to #{identity.status[i].status}"
                     
                     #update the database if necessary
                     if modified
+                        identity.complete = complete
                         collection.findOneAndReplace { _id: doc._id }, identity, ( err, result ) ->
+                            if err
+                                console.log err.message
+                                return
+                                
                             console.log "updated changed document in database"
                     else
                         console.log "no statuses have changed"
