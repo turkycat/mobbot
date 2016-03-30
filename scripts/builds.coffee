@@ -173,12 +173,35 @@ module.exports = (robot) ->
             console.log "database connection opened."
             collection = database.collection if DEBUG_MODE then "test_builds" else "builds"
             
-            collection = "builds"
-            collection = "test_builds" if DEBUG_MODE
+            #go through each build identity retrieved and try to find it in the database by guid
+            for identity in query.build_identities
+                collection.findOne { "guid": identity.guid }, {}, ( err, doc ) ->
+                    if err
+                        console.log err.message
+                        return
+                    
+                    #iterate through the statuses on the returned document looking for changes
+                    modified = false
+                    for doc_status, i in doc.status
+                        if doc_status.status != identity.status[i].status
+                            modified = true
+                            console.log "status for #{identity.build_id}.#{identity.branch}.#{identity.date}:#{doc_status.flavor} changed from #{doc_status.status} to #{identity.status[i].status}"
+                            doc_status.status = identity.status[i].status
+                    
+                    #update the database if necessary
+                    if modified
+                    
+                    else
+                        console.log "no statuses have changed"
             
-            if DEBUG_MODE
-                db.insert_items query.build_identities[0], collection, ( err, result ) ->
-                    db.close_database()
+            #collection.insert query.build_identities, null, ( err, result ) ->
+            #    if err
+            #        console.log err
+            #        return
+            #        
+            #    console.log "inserted #{result.result.n} items into the database collection"
+            #database.close()
+            #console.log "database connection closed."
         
         #TODO
         #robot.emit 'slack.attachment',
