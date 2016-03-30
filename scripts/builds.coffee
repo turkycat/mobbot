@@ -186,11 +186,11 @@ module.exports = (robot) ->
                         if doc_status.status != identity.status[i].status
                             modified = true
                             console.log "status for #{identity.build_id}.#{identity.branch}.#{identity.date}:#{doc_status.flavor} changed from #{doc_status.status} to #{identity.status[i].status}"
-                            doc_status.status = identity.status[i].status
                     
                     #update the database if necessary
                     if modified
-                    
+                        collection.findOneAndReplace { _id: doc._id }, identity, ( err, result ) ->
+                            console.log "updated changed document in database"
                     else
                         console.log "no statuses have changed"
             
