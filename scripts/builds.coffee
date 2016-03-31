@@ -62,6 +62,11 @@ module.exports = (robot) ->
             @complete = false
             @status = []
             
+    class SlackUser
+        constructor: (username) ->
+            @username = username
+            @subscriptions = []
+            
     
     #open the database
     mongo.connect mongourl, ( err, database ) ->
@@ -255,17 +260,76 @@ module.exports = (robot) ->
             channel: "#build-breaks"
         }
         
+        
+    perform_user_query = ( response ) ->
+        branch = response.match[1]
+        count = if response.match[2] then parseInt response.match[2] else 1
+        response.send "Fetching official builds for #{branch}"
+        fetch_builds new BuildQuery response, branch, count, print_results
+        
+        
+    add_remove_subscribers = ( response ) ->
+        subscribing = response.match[1] == "subscribe" || response.match[1] == "-s"
+        branch = "#{branch_root_address}#{response.match[2]}"
+        name = response.user.name
+        
+        #get subscriber collection
+        collection = db.collection if DEBUG_MODE then "test_subscribers" else "subscribers"
+        
+        #attempt to retrieve the user document from the collection
+        collection.findOne { username: name }, ( err, doc ) ->
+            if err
+                console.log err
+                return response.send "There was an error with that request. #{err}"
+                
+            #if we did not find a document for the user and they are subscribing to a build, add them to the collection
+            if !doc
+                if subscribing
+                    user = new SlackUser name
+                    user.subscriptions.push branch
+                    return collection.insertOne user, ( err, result ) ->
+                        if err
+                            console.log err
+                            return response.send "There was an error with that request. #{err}"
+                            
+                        if result.result.n == 1
+                            return response.send "Success! You are now subscribed to status changes for #{branch}. I will send you a direct message when build statuses change."
+                else
+                    #if they are not subscribing and there is no document retrieved, there is nothing to do.
+                    return response.send "You are not subscribed to #{branch}."
+                        
+            #we found the user in the database, let's make sure they aren't already subscribed
+            active = false
+            for sub in doc.subscriptions
+                if sub == branch
+                    active = true
+                    response.send "You are already subscribed to #{branch}!"
+                    return !active
+                    
+            #there is no current subscription for this branch. add it and update the database
+            if !active
+                doc.subscriptions.push branch
+                collection.findOneAndReplace { _id: doc._id }, doc, ( err, result ) ->
+                    if err
+                        console.log err.message
+                        return
+                        
+                    return response.send "Success! You are now subscribed to #{doc.subscriptions.length} branches."
+        
     
     if DEBUG_MODE
         $DEBUG.send "Fetching builds from file"
         fetch_builds new BuildQuery $DEBUG, "dv1", 1, check_for_state_change
     else
-        robot.hear /^builds? ?(.{2}\d) ?(\d*){1}/i, (response) ->
-            branch = response.match[1]
-            count = if response.match[2] then parseInt response.match[2] else 1
-            response.send "Fetching official builds for #{branch}"
-            fetch_builds new BuildQuery response, branch, count, print_results
+        #respond to direct queries in channel or DM
+        robot.hear /^builds? ?(.{2}\d) ?(\d*){1}/i, perform_user_query
+        robot.respond /builds? ?(.{2}\d) ?(\d*){1}/ig, perform_user_query
+        
+        #add or remove subscribers for a branch
+        robot.hear /^builds?\s(unsubscribe|subscribe|-s|-u)\s(\w+)\s(.{2}\d)/i, add_remove_subscribers
+        robot.respond /builds?\s(unsubscribe|subscribe|-s|-u)\s(\w+)\s(.{2}\d)/i, add_remove_subscribers
 
+        #set an interval to periodically check for build updates on all branches
         setInterval () ->
             console.log "Interval elapsed. Checking build statuses for changes."
             fetch_builds new BuildQuery response_logger, "dv1", 1, check_for_state_change
