@@ -10,12 +10,12 @@
 
 
 #set DEBUG_MODE to true and run this compiled script with node, see top of script for more information.
-DEBUG_MODE = true
+DEBUG_MODE = false
 $DEBUG = null
 if DEBUG_MODE
-    $DEBUG = require "../test_files/dbgbot"
-    $DEBUG.builds_path = "../test_files/builds.txt"
-    $DEBUG.status_path = "../test_files/buildstatus.txt"
+    $DEBUG = require "/home/pi/git/mobbot/test_files/dbgbot"
+    $DEBUG.builds_path = "/home/pi/git/mobbot/test_files/builds.txt"
+    $DEBUG.status_path = "/home/pi/git/mobbot/test_files/buildstatus.txt"
 
 module.exports = (robot) ->
     
@@ -60,6 +60,11 @@ module.exports = (robot) ->
             @fetched = false
             @complete = false
             @status = []
+
+    response_logger = {
+        send: ( message ) ->
+            console.log message
+    }
     
     fetch_builds = (query) ->
         web_address = "#{windowsbuild_root_address}#{windowsbuild_branch_address}#{query.branch}"
@@ -217,29 +222,30 @@ module.exports = (robot) ->
                         console.log "no statuses have changed"
             
             
-    emit_state_change = ( identity_document, new_status, old_status ) ->
+    emit_state_change = ( identity_document, old_status, new_status ) ->
         console.log "status for #{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}:#{new_status.flavor} changed from #{old_status.status} to #{new_status.status}"
         
         #emit a message to the appropriate slack channel if the status is failed or complete
-        if new_status.status == "Failed" || new_status.status == "Completed"
-            console.log "failed or completed"
+        #if new_status.status == "Failed" || new_status.status == "Completed"
+            #console.log "build has changed to failed or completed. Emitting Slack message."
             
-            pattern = {
-                fallback: "There was a problem, but trust me, the message I was going to post here was really sweet."
-                text: ""
-                color: "good"
-                author_name: "#{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}",
-                title: "#{new_status.flavor}",
-                title_link: "#{identity_document.web_address}"
-            }
-            
-            pattern.text = "Status changed from #{old_status.status} to #{new_status.status}"
-            pattern.color = "danger" if new_status.status == "Failed"
-            
-            robot.emit 'slack.attachment',
-                message: robot.message
-                content: pattern
-                channel: "#build-breaks"
+        pattern = {
+            fallback: "There was a problem, but trust me, the message I was going to post here was really sweet."
+            text: ""
+            color: "good"
+            author_name: "#{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}",
+            title: "#{new_status.flavor}",
+            title_link: "#{identity_document.web_address}"
+        }
+        
+        pattern.text = "Status changed from #{old_status.status} to #{new_status.status}"
+        pattern.color = "danger" if new_status.status == "Failed"
+        pattern.color = "warning" if new_status.status == "Cancelled"
+        
+        robot.emit 'slack.attachment',
+            message: robot.message
+            content: pattern
+            channel: "#build-breaks"
         
     
     if DEBUG_MODE
@@ -251,6 +257,14 @@ module.exports = (robot) ->
             count = if response.match[2] then parseInt response.match[2] else 1
             response.send "Fetching official builds for #{branch}"
             fetch_builds new BuildQuery response, branch, count, print_results
+
+        setInterval () ->
+            console.log "Interval elapsed. Checking build statuses for changes."
+            fetch_builds new BuildQuery response_logger, "dv1", 1, check_for_state_change
+            fetch_builds new BuildQuery response_logger, "dv2", 1, check_for_state_change
+            fetch_builds new BuildQuery response_logger, "dv3", 1, check_for_state_change
+            fetch_builds new BuildQuery response_logger, "dv4", 1, check_for_state_change
+        , 120000
 
 #invoke the function we just set to module.exports with the $DEBUG object as the robot param
 if DEBUG_MODE
