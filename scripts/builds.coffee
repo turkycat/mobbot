@@ -24,6 +24,7 @@ module.exports = (robot) ->
     $ = require "jquery"
     mongo = require "mongodb"
     .MongoClient
+    db = null
     
     #behave like static variables
     mongourl = "mongodb://localhost:27017/mobbot"
@@ -60,6 +61,17 @@ module.exports = (robot) ->
             @fetched = false
             @complete = false
             @status = []
+            
+    
+    #open the database
+    mongo.connect mongourl, ( err, database ) ->
+        if err
+            console.log err
+            return
+        
+        db = database
+        console.log "database connection opened."
+        
 
     response_logger = {
         send: ( message ) ->
@@ -165,61 +177,55 @@ module.exports = (robot) ->
     
     check_for_state_change = (query) ->
     
-        #open the database to check and possibly update the stored values for the retrieved builds
-        mongo.connect mongourl, ( err, database ) ->
-            if err
-                console.log err
-                return
-                
-            console.log "database connection opened."
-            collection = database.collection if DEBUG_MODE then "test_builds" else "builds"
-            
-            #go through each build identity retrieved and try to find it in the database by guid
-            for identity in query.build_identities                
-                collection.findOne { "guid": identity.guid }, {}, ( err, doc ) ->
-                    if err
-                        console.log err.message
-                        return
-                        
-                    #if the returned doc is null, the database does not have an entry for this identity. Add it!
-                    if !doc
-                        return collection.insert identity, ( err, result ) ->
-                            if err
-                                console.log err
-                                return
-                                
-                            if result.result.n == 1
-                                console.log "inserted a new build into the database collection"
-                            else
-                                console.log "there was a problem inserting a new build into the database"
-                        
-                    #determine if this build is already complete
-                    if doc.complete
-                        console.log "all builds for this identity have stopped. skipping update check"
-                        return
+        #check and possibly update the stored values for the retrieved builds
+        collection = db.collection if DEBUG_MODE then "test_builds" else "builds"
+        
+        #go through each build identity retrieved and try to find it in the database by guid
+        for identity in query.build_identities                
+            collection.findOne { "guid": identity.guid }, {}, ( err, doc ) ->
+                if err
+                    console.log err.message
+                    return
                     
-                    #iterate through the statuses on the returned document looking for changes and completeness
-                    modified = false
-                    complete = true
-                    for doc_status, i in doc.status
-                        if identity.status[i].status == "Started" || identity.status[i].status == "Failed"
-                            complete = false
+                #if the returned doc is null, the database does not have an entry for this identity. Add it!
+                if !doc
+                    return collection.insert identity, ( err, result ) ->
+                        if err
+                            console.log err
+                            return
                             
-                        if doc_status.status != identity.status[i].status
-                            modified = true
-                            emit_state_change doc, doc_status, identity.status[i]
+                        if result.result.n == 1
+                            console.log "inserted a new build into the database collection"
+                        else
+                            console.log "there was a problem inserting a new build into the database"
                     
-                    #update the database if necessary
-                    if modified
-                        identity.complete = complete
-                        collection.findOneAndReplace { _id: doc._id }, identity, ( err, result ) ->
-                            if err
-                                console.log err.message
-                                return
-                                
-                            console.log "updated changed document in database"
-                    else
-                        console.log "no statuses have changed"
+                #determine if this build is already complete
+                if doc.complete
+                    console.log "all builds for this identity have stopped. skipping update check"
+                    return
+                
+                #iterate through the statuses on the returned document looking for changes and completeness
+                modified = false
+                complete = true
+                for doc_status, i in doc.status
+                    if identity.status[i].status == "Started" || identity.status[i].status == "Failed"
+                        complete = false
+                        
+                    if doc_status.status != identity.status[i].status
+                        modified = true
+                        emit_state_change doc, doc_status, identity.status[i]
+                
+                #update the database if necessary
+                if modified
+                    identity.complete = complete
+                    collection.findOneAndReplace { _id: doc._id }, identity, ( err, result ) ->
+                        if err
+                            console.log err.message
+                            return
+                            
+                        console.log "updated changed document in database"
+                else
+                    console.log "no statuses have changed"
             
             
     emit_state_change = ( identity_document, old_status, new_status ) ->
