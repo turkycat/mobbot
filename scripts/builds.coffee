@@ -224,10 +224,22 @@ module.exports = (robot) ->
         if new_status.status == "Failed" || new_status.status == "Completed"
             console.log "failed or completed"
             
-            #robot.emit 'slack.attachment',
-            #    message: botres.message
-            #    content: build_report_content
-            #    channel: botres.message.room
+            pattern = {
+                fallback: "There was a problem, but trust me, the message I was going to post here was really sweet."
+                text: ""
+                color: "good"
+                author_name: "#{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}",
+                title: "#{new_status.flavor}",
+                title_link: "#{identity_document.web_address}"
+            }
+            
+            pattern.text = "Status changed from #{old_status.status} to #{new_status.status}"
+            pattern.color = "danger" if new_status.status == "Failed"
+            
+            robot.emit 'slack.attachment',
+                message: robot.message
+                content: pattern
+                channel: "#build-breaks"
         
     
     if DEBUG_MODE
