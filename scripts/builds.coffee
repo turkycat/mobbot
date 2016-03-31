@@ -291,7 +291,7 @@ module.exports = (robot) ->
     add_remove_subscribers = ( response ) ->
         subscribing = response.match[1] == "subscribe" || response.match[1] == "-s"
         branch = "#{branch_root_address}#{response.match[2]}"
-        name = response.user.name
+        name = response.envelope.user.name
         
         #get subscriber collection
         collection = db.collection if DEBUG_MODE then "test_subscribers" else "subscribers"
@@ -318,23 +318,32 @@ module.exports = (robot) ->
                     #if they are not subscribing and there is no document retrieved, there is nothing to do.
                     return response.send "You are not subscribed to #{branch}."
                         
-            #we found the user in the database, let's make sure they aren't already subscribed
-            active = false
-            for sub in doc.subscriptions
+            #we found the user in the database, let's look for the specified branch in their document
+            req_handled = false
+            for sub, i in doc.subscriptions
                 if sub == branch
-                    active = true
-                    response.send "You are already subscribed to #{branch}!"
-                    return !active
+                    req_handled = true
+                    if subscribing
+                        response.send "You are already subscribed to #{branch}!"
+                        return false
+
+                    else
+                        #we found the subscription to remove, lets remove it
+                        doc.subscriptions.splice i, 1
+                        response.send "You are no longer subscribed to #{branch}."
+
                     
-            #there is no current subscription for this branch. add it and update the database
-            if !active
+            #if the request is not yet handled, it is a subscribe request and was not found in the doc. Add it!
+            if !req_handled
                 doc.subscriptions.push branch
-                collection.findOneAndReplace { _id: doc._id }, doc, ( err, result ) ->
-                    if err
-                        console.log err.message
-                        return
-                        
-                    return response.send "Success! You are now personally subscribed to #{doc.subscriptions.length} branches."
+                response.send "Success! You are now personally subscribed to #{doc.subscriptions.length} branches."
+                
+            collection.findOneAndReplace { _id: doc._id }, doc, ( err, result ) ->
+                if err
+                    console.log err.message
+                    return
+                    
+                return console.log "successfully updated user document in the database."
         
     
     if DEBUG_MODE
