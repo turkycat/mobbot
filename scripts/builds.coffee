@@ -176,6 +176,19 @@ module.exports = (robot) ->
                         console.log err.message
                         return
                         
+                    #if the returned doc is null, the database does not have an entry for this identity. Add it!
+                    if !doc
+                        return collection.insert identity, ( err, result ) ->
+                            if err
+                                console.log err
+                                return
+                                
+                            if result.result.n == 1
+                                console.log "inserted a new build into the database collection"
+                            else
+                                console.log "there was a problem inserting a new build into the database"
+                        
+                    #determine if this build is already complete
                     if doc.complete
                         console.log "all builds for this identity have stopped. skipping update check"
                         return
@@ -189,7 +202,7 @@ module.exports = (robot) ->
                             
                         if doc_status.status != identity.status[i].status
                             modified = true
-                            console.log "status for #{identity.build_id}.#{identity.branch}.#{identity.date}:#{doc_status.flavor} changed from #{doc_status.status} to #{identity.status[i].status}"
+                            emit_state_change doc, doc_status, identity.status[i]
                     
                     #update the database if necessary
                     if modified
@@ -203,20 +216,18 @@ module.exports = (robot) ->
                     else
                         console.log "no statuses have changed"
             
-            #collection.insert query.build_identities, null, ( err, result ) ->
-            #    if err
-            #        console.log err
-            #        return
-            #        
-            #    console.log "inserted #{result.result.n} items into the database collection"
-            #database.close()
-            #console.log "database connection closed."
+            
+    emit_state_change = ( identity_document, new_status, old_status ) ->
+        console.log "status for #{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}:#{new_status.flavor} changed from #{old_status.status} to #{new_status.status}"
         
-        #TODO
-        #robot.emit 'slack.attachment',
-        #    message: botres.message
-        #    content: build_report_content
-        #    channel: botres.message.room
+        #emit a message to the appropriate slack channel if the status is failed or complete
+        if new_status.status == "Failed" || new_status.status == "Completed"
+            console.log "failed or completed"
+            
+            #robot.emit 'slack.attachment',
+            #    message: botres.message
+            #    content: build_report_content
+            #    channel: botres.message.room
         
     
     if DEBUG_MODE
