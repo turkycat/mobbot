@@ -243,7 +243,7 @@ module.exports = (robot) ->
         
         pattern = {
             pretext: "Status update for #{branch_short_name}"
-            fallback: "There was a problem, but trust me, the message I was going to post here was really sweet."
+            fallback: ""
             text: ""
             color: "good"
             author_name: "Build #{new_status.status}"
@@ -252,8 +252,20 @@ module.exports = (robot) ->
             title_link: "#{identity_document.web_address}"
         }
     
-        pattern.color = "danger" if new_status.status == "Failed"
-        pattern.color = "warning" if new_status.status == "Cancelled" 
+        if new_status.status == "Failed"
+            pattern.fallback = "Oh no! There is a problem with one of today's builds."
+            pattern.color = "danger"
+        else if new_status.status == "Completed"
+            pattern.fallback = "#{new_status.flavor} build complete for #{branch_short_name}!"
+        else if new_status.status == "Started" && old_status.status == "Failed"
+            pattern.fallback = "#{new_status.flavor} build resumed for #{branch_short_name}."
+            pattern.color = "warning"
+        else
+            pattern.fallback = "An update to one of today's builds has been posted to Slack."
+            pattern.color = "warning"
+            
+            if new_status.status == "Cancelled"
+                pattern.color = "warning"
         
         #emit a message to the appropriate slack channel if the status is failed or complete
         if new_status.status == "Failed" || new_status.status == "Completed"
