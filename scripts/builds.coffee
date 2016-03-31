@@ -225,33 +225,35 @@ module.exports = (robot) ->
                             
                         console.log "updated changed document in database"
                 else
-                    console.log "no statuses have changed"
+                    console.log "No build statuses have changed for #{query.branch}"
             
             
     emit_state_change = ( identity_document, old_status, new_status ) ->
         console.log "status for #{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}:#{new_status.flavor} changed from #{old_status.status} to #{new_status.status}"
         
         #emit a message to the appropriate slack channel if the status is failed or complete
-        #if new_status.status == "Failed" || new_status.status == "Completed"
-            #console.log "build has changed to failed or completed. Emitting Slack message."
+        if new_status.status == "Failed" || new_status.status == "Completed"
+            console.log "build has changed to failed or completed. Emitting Slack message."
             
-        pattern = {
-            fallback: "There was a problem, but trust me, the message I was going to post here was really sweet."
-            text: ""
-            color: "good"
-            author_name: "#{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}",
-            title: "#{new_status.flavor}",
-            title_link: "#{identity_document.web_address}"
-        }
+            pattern = {
+                pretext: "Status update for #{identity_document.branch}"
+                fallback: "There was a problem, but trust me, the message I was going to post here was really sweet."
+                text: ""
+                color: "good"
+                author_name: "Build #{new_status.status}"
+                title: "id: #{identity_document.build_id} timestamp: #{identity_document.date}",
+                text: "#{new_status.flavor}",
+                title_link: "#{identity_document.web_address}"
+            }
         
-        pattern.text = "Status changed from #{old_status.status} to #{new_status.status}"
         pattern.color = "danger" if new_status.status == "Failed"
         pattern.color = "warning" if new_status.status == "Cancelled"
         
-        robot.emit 'slack.attachment',
+        robot.emit 'slack.attachment', {
             message: robot.message
             content: pattern
             channel: "#build-breaks"
+        }
         
     
     if DEBUG_MODE
