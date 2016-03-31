@@ -236,30 +236,45 @@ module.exports = (robot) ->
     emit_state_change = ( identity_document, old_status, new_status ) ->
         console.log "status for #{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}:#{new_status.flavor} changed from #{old_status.status} to #{new_status.status}"
         
+        pattern = {
+            pretext: "Status update for #{identity_document.branch}"
+            fallback: "There was a problem, but trust me, the message I was going to post here was really sweet."
+            text: ""
+            color: "good"
+            author_name: "Build #{new_status.status}"
+            title: "id: #{identity_document.build_id} timestamp: #{identity_document.date}",
+            text: "#{new_status.flavor}",
+            title_link: "#{identity_document.web_address}"
+        }
+    
+        pattern.color = "danger" if new_status.status == "Failed"
+        pattern.color = "warning" if new_status.status == "Cancelled" 
+        
         #emit a message to the appropriate slack channel if the status is failed or complete
         if new_status.status == "Failed" || new_status.status == "Completed"
             console.log "build has changed to failed or completed. Emitting Slack message."
             
-            pattern = {
-                pretext: "Status update for #{identity_document.branch}"
-                fallback: "There was a problem, but trust me, the message I was going to post here was really sweet."
-                text: ""
-                color: "good"
-                author_name: "Build #{new_status.status}"
-                title: "id: #{identity_document.build_id} timestamp: #{identity_document.date}",
-                text: "#{new_status.flavor}",
-                title_link: "#{identity_document.web_address}"
+            robot.emit 'slack.attachment', {
+                message: robot.message
+                content: pattern
+                channel: "#build-breaks"
             }
-        
-        pattern.color = "danger" if new_status.status == "Failed"
-        pattern.color = "warning" if new_status.status == "Cancelled"
-        
-        robot.emit 'slack.attachment', {
-            message: robot.message
-            content: pattern
-            channel: "#build-breaks"
-        }
-        
+            
+        collection = db.collection if DEBUG_MODE then "test_subscribers" else "subscribers"
+        collection.find( { subscriptions: identity_document.branch } ).toArray ( err, docs ) ->
+            if err 
+                return console.log err
+                
+            if docs
+                console.log "found subscribers for #{identity_document.branch}, sending direct messages..."
+                for doc in docs
+                    robot.emit 'slack.attachment', {
+                        message: robot.message
+                        content: pattern
+                        channel: doc.username
+                    }
+                
+            
         
     perform_user_query = ( response ) ->
         branch = response.match[1]
@@ -293,7 +308,7 @@ module.exports = (robot) ->
                             return response.send "There was an error with that request. #{err}"
                             
                         if result.result.n == 1
-                            return response.send "Success! You are now subscribed to status changes for #{branch}. I will send you a direct message when build statuses change."
+                            return response.send "Success! You are now personally subscribed to status changes for #{branch}. I will send you a direct message when build statuses change."
                 else
                     #if they are not subscribing and there is no document retrieved, there is nothing to do.
                     return response.send "You are not subscribed to #{branch}."
@@ -314,7 +329,7 @@ module.exports = (robot) ->
                         console.log err.message
                         return
                         
-                    return response.send "Success! You are now subscribed to #{doc.subscriptions.length} branches."
+                    return response.send "Success! You are now personally subscribed to #{doc.subscriptions.length} branches."
         
     
     if DEBUG_MODE
