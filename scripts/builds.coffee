@@ -235,14 +235,19 @@ module.exports = (robot) ->
             
     emit_state_change = ( identity_document, old_status, new_status ) ->
         console.log "status for #{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}:#{new_status.flavor} changed from #{old_status.status} to #{new_status.status}"
+       
+        #slice off the last bit of the branch name for cleaner messages
+        branch_regex = /.*_(.+)$/i
+        branch_matches = branch_regex.exec identity_document.branch
+        branch_short_name = branch_matches[1]
         
         pattern = {
-            pretext: "Status update for #{identity_document.branch}"
+            pretext: "Status update for #{branch_short_name}"
             fallback: "There was a problem, but trust me, the message I was going to post here was really sweet."
             text: ""
             color: "good"
             author_name: "Build #{new_status.status}"
-            title: "id: #{identity_document.build_id} timestamp: #{identity_document.date}",
+            title: "#{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}",
             text: "#{new_status.flavor}",
             title_link: "#{identity_document.web_address}"
         }
@@ -341,8 +346,8 @@ module.exports = (robot) ->
         robot.respond /builds? ?(.{2}\d) ?(\d*){1}/ig, perform_user_query
         
         #add or remove subscribers for a branch
-        robot.hear /^builds?\s(unsubscribe|subscribe|-s|-u)\s(\w+)\s(.{2}\d)/i, add_remove_subscribers
-        robot.respond /builds?\s(unsubscribe|subscribe|-s|-u)\s(\w+)\s(.{2}\d)/i, add_remove_subscribers
+        robot.hear /^builds?\s(unsubscribe|subscribe|-s|-u)\s(.{2}\d)/i, add_remove_subscribers
+        robot.respond /builds?\s(unsubscribe|subscribe|-s|-u)\s(.{2}\d)/i, add_remove_subscribers
 
         #set an interval to periodically check for build updates on all branches
         setInterval () ->
