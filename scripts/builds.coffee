@@ -210,18 +210,18 @@ module.exports = (robot) ->
                     return
                 
                 #iterate through the statuses on the returned document looking for changes and completeness
-                modified = false
-                complete = true
+                update_needed = doc.status.length != identity.status.length     #update needed if new builds have started
+                complete = !update_needed                                       #default value is usually true, but will be false if new builds have started
                 for doc_status, i in doc.status
                     if identity.status[i].status == "Started" || identity.status[i].status == "Failed"
                         complete = false
                         
                     if doc_status.status != identity.status[i].status
-                        modified = true
+                        update_needed = true
                         emit_state_change doc, doc_status, identity.status[i]
                 
                 #update the database if necessary
-                if modified
+                if update_needed
                     identity.complete = complete
                     collection.findOneAndReplace { _id: doc._id }, identity, ( err, result ) ->
                         if err
