@@ -251,7 +251,9 @@ module.exports = (robot) ->
             text: "#{new_status.flavor}",
             title_link: "#{identity_document.web_address}"
         }
-    
+
+        #customize some of the fields based on what is being sent
+        #fallback text is what is displayed on any notifications that go out for this message    
         if new_status.status == "Failed"
             pattern.fallback = "Oh no! There is a problem with one of today's builds."
             pattern.color = "danger"
@@ -259,6 +261,7 @@ module.exports = (robot) ->
             pattern.fallback = "#{new_status.flavor} build complete for #{branch_short_name}!"
         else if new_status.status == "Started" && old_status.status == "Failed"
             pattern.fallback = "#{new_status.flavor} build resumed for #{branch_short_name}."
+            pattern.author_name = "Build resumed"
             pattern.color = "warning"
         else
             pattern.fallback = "An update to one of today's builds has been posted to Slack."
