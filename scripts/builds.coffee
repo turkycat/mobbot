@@ -245,7 +245,7 @@ module.exports = (robot) ->
             pretext: "Status update for #{branch_short_name}"
             fallback: ""
             text: ""
-            color: "good"
+            color: "warning"
             author_name: "Build #{new_status.status}"
             title: "#{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}",
             text: "#{new_status.flavor}",
@@ -255,20 +255,16 @@ module.exports = (robot) ->
         #customize some of the fields based on what is being sent
         #fallback text is what is displayed on any notifications that go out for this message    
         if new_status.status == "Failed"
-            pattern.fallback = "Oh no! There is a problem with one of today's builds."
+            pattern.fallback = "Oh no! #{new_status.flavor} build failed for #{branch_short_name}."
             pattern.color = "danger"
         else if new_status.status == "Completed"
             pattern.fallback = "#{new_status.flavor} build complete for #{branch_short_name}!"
+            pattern.color = "good"
         else if new_status.status == "Started" && old_status.status == "Failed"
             pattern.fallback = "#{new_status.flavor} build resumed for #{branch_short_name}."
             pattern.author_name = "Build resumed"
-            pattern.color = "warning"
         else
             pattern.fallback = "An update to one of today's builds has been posted to Slack."
-            pattern.color = "warning"
-            
-            if new_status.status == "Cancelled"
-                pattern.color = "warning"
         
         #emit a message to the appropriate slack channel if the status is failed or complete
         if new_status.status != "Cancelled"
