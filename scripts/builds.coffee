@@ -271,8 +271,8 @@ module.exports = (robot) ->
                 pattern.color = "warning"
         
         #emit a message to the appropriate slack channel if the status is failed or complete
-        if new_status.status == "Failed" || new_status.status == "Completed"
-            console.log "build has changed to failed or completed. Emitting Slack message."
+        if new_status.status != "Cancelled"
+            console.log "build for #{branch_short_name} has failed, completed, or has been resumed. Emitting message to Slack channel."
             
             robot.emit 'slack.attachment', {
                 message: robot.message
