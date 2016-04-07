@@ -71,7 +71,7 @@ module.exports = (robot) ->
     #open the database
     mongo.connect mongourl, ( err, database ) ->
         if err
-            console.log err
+            console.log "DATABASE ERROR: #{err.message}"
             return
         
         db = database
@@ -189,14 +189,14 @@ module.exports = (robot) ->
         for identity in query.build_identities                
             collection.findOne { "guid": identity.guid }, {}, ( err, doc ) ->
                 if err
-                    console.log err.message
+                    console.log "DATABASE ERROR: #{err.message}"
                     return
                     
                 #if the returned doc is null, the database does not have an entry for this identity. Add it!
                 if !doc
                     return collection.insert identity, ( err, result ) ->
                         if err
-                            console.log err
+                            console.log "DATABASE ERROR: #{err.message}"
                             return
                             
                         if result.result.n == 1
@@ -225,7 +225,7 @@ module.exports = (robot) ->
                     identity.complete = complete
                     collection.findOneAndReplace { _id: doc._id }, identity, ( err, result ) ->
                         if err
-                            console.log err.message
+                            console.log "DATABASE ERROR: #{err.message}"
                             return
                             
                         console.log "updated changed document in database"
@@ -279,7 +279,7 @@ module.exports = (robot) ->
         collection = db.collection if DEBUG_MODE then "test_subscribers" else "subscribers"
         collection.find( { subscriptions: identity_document.branch } ).toArray ( err, docs ) ->
             if err 
-                return console.log err
+                return console.log "DATABASE ERROR: #{err.message}"
                 
             if docs
                 console.log "found subscribers for #{identity_document.branch}, sending direct messages..."
@@ -299,8 +299,7 @@ module.exports = (robot) ->
         fetch_builds new BuildQuery response, branch, count, print_results
         
         
-    add_remove_subscribers = ( response ) ->
-        subscribing = response.match[1] == "subscribe" || response.match[1] == "-s"
+    add_subscribers = ( response ) ->
         branch = "#{branch_root_address}#{response.match[2]}"
         name = response.envelope.user.name
         
@@ -310,51 +309,82 @@ module.exports = (robot) ->
         #attempt to retrieve the user document from the collection
         collection.findOne { username: name }, ( err, doc ) ->
             if err
-                console.log err
-                return response.send "There was an error with that request. #{err}"
+                console.log "DATABASE ERROR: #{err.message}"
+                return response.send "There was an error with that request, please try again. #{err}"
                 
             #if we did not find a document for the user and they are subscribing to a build, add them to the collection
             if !doc
-                if subscribing
-                    user = new SlackUser name
-                    user.subscriptions.push branch
-                    return collection.insertOne user, ( err, result ) ->
-                        if err
-                            console.log err
-                            return response.send "There was an error with that request. #{err}"
-                            
-                        if result.result.n == 1
-                            return response.send "Success! You are now personally subscribed to status changes for #{branch}. I will send you a direct message when build statuses change."
-                else
-                    #if they are not subscribing and there is no document retrieved, there is nothing to do.
-                    return response.send "You are not subscribed to #{branch}."
+                user = new SlackUser name
+                user.subscriptions.push branch
+                return collection.insertOne user, ( err, result ) ->
+                    if err
+                        console.log "DATABASE ERROR: #{err.message}"
+                        return response.send "There was an error with that request, please try again. #{err}"
                         
-            #we found the user in the database, let's look for the specified branch in their document
-            req_handled = false
+                    if result.result.n == 1
+                        return response.send "Success! You are now personally subscribed to status changes for #{branch}. I will send you a direct message when build statuses change."
+                        
+            #we found the user in the database, let's double check that they aren't already subscribed
+            user_subscribed = false
             for sub, i in doc.subscriptions
                 if sub == branch
-                    req_handled = true
-                    if subscribing
-                        response.send "You are already subscribed to #{branch}!"
-                        return false
-
-                    else
-                        #we found the subscription to remove, lets remove it
-                        doc.subscriptions.splice i, 1
-                        response.send "You are no longer subscribed to #{branch}."
-
+                    user_subscribed = true
+                    response.send "You are already subscribed to #{branch}!"
+                    return false
                     
-            #if the request is not yet handled, it is a subscribe request and was not found in the doc. Add it!
-            if !req_handled
+            #if the user is not already subscribed to this branch, we will add it and update the database
+            if !user_subscribed
                 doc.subscriptions.push branch
-                response.send "Success! You are now personally subscribed to #{doc.subscriptions.length} branches."
                 
-            collection.findOneAndReplace { _id: doc._id }, doc, ( err, result ) ->
-                if err
-                    console.log err.message
-                    return
+                collection.findOneAndReplace { _id: doc._id }, doc, ( err, result ) ->
+                    if err
+                        console.log "DATABASE ERROR: #{err.message}"
+                        response.send "There was an error with that request, please try again. #{err}."
+                        return
                     
-                return console.log "successfully updated user document in the database."
+                    response.send "Success! You are now personally subscribed to #{doc.subscriptions.length} branches."
+                    return console.log "successfully updated user document in the database."
+        
+        
+    remove_subscribers = ( response ) ->
+        branch = "#{branch_root_address}#{response.match[2]}"
+        name = response.envelope.user.name
+        
+        #get subscriber collection
+        collection = db.collection if DEBUG_MODE then "test_subscribers" else "subscribers"
+        
+        #attempt to retrieve the user document from the collection
+        collection.findOne { username: name }, ( err, doc ) ->
+            if err
+                console.log "DATABASE ERROR: #{err.message}"
+                return response.send "There was an error with that request, please try again. #{err}"
+                
+            #if we did not find a document for the user, they are not subscribed to any builds
+            if !doc
+                return response.send "You are not subscribed to any branches."
+                        
+            #we found the user in the database, let's look for the specified branch in their document and remove it
+            subscription_removed = false
+            for sub, i in doc.subscriptions
+                if sub == branch
+                    #we found the subscription to remove, lets remove it
+                    subscription_removed = true
+                    doc.subscriptions.splice i, 1
+                    response.send "You are no longer subscribed to #{branch}."
+                    return false
+                    
+            #if the subscription was removed, we need to update the database
+            if subscription_removed
+                collection.findOneAndReplace { _id: doc._id }, doc, ( err, result ) ->
+                    if err
+                        console.log "DATABASE ERROR: #{err.message}"
+                        return response.send "There was an error with that request, please try again. #{err}"
+                
+                    console.log "successfully updated user document in the database."
+                    return response.send "You are no longer subscribed to #{branch}."
+            else
+                response.send "You are not subscribed to #{branch}!"
+            
         
     
     if DEBUG_MODE
@@ -362,12 +392,16 @@ module.exports = (robot) ->
         fetch_builds new BuildQuery $DEBUG, "dv1", 1, check_for_state_change
     else
         #respond to direct queries in channel or DM
-        robot.hear /^builds? ?(.{2}\d) ?(\d*){1}/i, perform_user_query
-        robot.respond /builds? ?(.{2}\d) ?(\d*){1}/ig, perform_user_query
+        robot.hear /^builds?\s?(.{2}\d)\s?(\d*){1}/i, perform_user_query
+        robot.respond /builds?\s?(.{2}\d)\s?(\d*){1}/ig, perform_user_query
         
-        #add or remove subscribers for a branch
-        robot.hear /^builds?\s(unsubscribe|subscribe|-s|-u)\s(.{2}\d)/i, add_remove_subscribers
-        robot.respond /builds?\s(unsubscribe|subscribe|-s|-u)\s(.{2}\d)/i, add_remove_subscribers
+        #add subscribers to a branch
+        robot.hear /^builds?\s(subscribe|-s)\s(.{2}\d)/i, add_subscribers
+        robot.respond /builds?\s(subscribe|-s)\s(.{2}\d)/ig, add_subscribers
+        
+        #remove subscribers from a branch
+        robot.hear /^builds?\s(unsubscribe|-u)\s(.{2}\d)/i, remove_subscribers
+        robot.respond /builds?\s(unsubscribe|-u)\s(.{2}\d)/ig, remove_subscribers
 
         #set an interval to periodically check for build updates on all branches
         setInterval () ->
