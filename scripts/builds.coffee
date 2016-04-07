@@ -370,7 +370,6 @@ module.exports = (robot) ->
                     #we found the subscription to remove, lets remove it
                     subscription_removed = true
                     doc.subscriptions.splice i, 1
-                    response.send "You are no longer subscribed to #{branch}."
                     return false
                     
             #if the subscription was removed, we need to update the database
@@ -393,15 +392,15 @@ module.exports = (robot) ->
     else
         #respond to direct queries in channel or DM
         robot.hear /^builds?\s?(.{2}\d)\s?(\d*){1}/i, perform_user_query
-        robot.respond /builds?\s?(.{2}\d)\s?(\d*){1}/ig, perform_user_query
+        robot.respond /builds?\s?(.{2}\d)\s?(\d*){1}/i, perform_user_query
         
         #add subscribers to a branch
         robot.hear /^builds?\s(subscribe|-s)\s(.{2}\d)/i, add_subscribers
-        robot.respond /builds?\s(subscribe|-s)\s(.{2}\d)/ig, add_subscribers
+        robot.respond /builds?\s(subscribe|-s)\s(.{2}\d)/i, add_subscribers
         
         #remove subscribers from a branch
         robot.hear /^builds?\s(unsubscribe|-u)\s(.{2}\d)/i, remove_subscribers
-        robot.respond /builds?\s(unsubscribe|-u)\s(.{2}\d)/ig, remove_subscribers
+        robot.respond /builds?\s(unsubscribe|-u)\s(.{2}\d)/i, remove_subscribers
 
         #set an interval to periodically check for build updates on all branches
         setInterval () ->
