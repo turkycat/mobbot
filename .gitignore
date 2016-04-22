@@ -6,3 +6,4 @@ log.txt
 *.js
 test_files/*.txt
 data/*
+logs/*

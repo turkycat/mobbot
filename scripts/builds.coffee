@@ -206,7 +206,7 @@ module.exports = (robot) ->
                     
                 #determine if this build is already complete
                 if doc.complete
-                    console.log "all builds for this identity have stopped. skipping update check"
+                    console.log "all builds for #{query.branch} have stopped. skipping update check"
                     return
                 
                 #iterate through the statuses on the returned document looking for changes and completeness
@@ -293,15 +293,19 @@ module.exports = (robot) ->
             
         
     perform_user_query = ( response ) ->
+        console.log "\nreceived user query: #{response.message}"
         branch = response.match[1]
         count = if response.match[2] then parseInt response.match[2] else 1
+        console.log "Fetching official builds for #{branch}"
         response.send "Fetching official builds for #{branch}"
         fetch_builds new BuildQuery response, branch, count, print_results
         
         
     add_subscribers = ( response ) ->
+        console.log "\nreceived user query: #{response.message}"
         branch = "#{branch_root_address}#{response.match[2]}"
         name = response.envelope.user.name
+        console.log "add_subscribers request for user: #{name}. branch to add: #{branch}"
         
         #get subscriber collection
         collection = db.collection if DEBUG_MODE then "test_subscribers" else "subscribers"
@@ -314,6 +318,7 @@ module.exports = (robot) ->
                 
             #if we did not find a document for the user and they are subscribing to a build, add them to the collection
             if !doc
+                console.log "#{name} is not subscribed to any branches. adding a new subscription document."
                 user = new SlackUser name
                 user.subscriptions.push branch
                 return collection.insertOne user, ( err, result ) ->
@@ -322,23 +327,31 @@ module.exports = (robot) ->
                         return response.send "There was an error with that request, please try again. #{err}"
                         
                     if result.result.n == 1
+                        console.log "successfully added user document for #{name} to the database."
                         return response.send "Success! You are now personally subscribed to status changes for #{branch}. I will send you a direct message when build statuses change."
                         
             #we found the user in the database, let's double check that they aren't already subscribed
-            user_subscribed = false
+            sub_found = false
             for sub, i in doc.subscriptions
                 if sub == branch
-                    user_subscribed = true
+                    sub_found = true
+                    console.log "#{name} is already subscribed to #{branch}. quitting."
                     response.send "You are already subscribed to #{branch}!"
-                    return false
+                    break
                     
             #if the user is not already subscribed to this branch, we will add it and update the database
-            if !user_subscribed
+            if !sub_found
+                console.log "updating database document for #{name} to add a new subscription to #{branch}"
                 doc.subscriptions.push branch
                 
                 collection.findOneAndReplace { _id: doc._id }, doc, ( err, result ) ->
                     if err
                         console.log "DATABASE ERROR: #{err.message}"
+                        response.send "There was an error with that request, please try again. #{err}."
+                        return
+                        
+                    if !result.ok
+                        console.log "unsuccessful attempt to update the document. result code: #{result.ok}"
                         response.send "There was an error with that request, please try again. #{err}."
                         return
                     
@@ -347,8 +360,10 @@ module.exports = (robot) ->
         
         
     remove_subscribers = ( response ) ->
+        console.log "\nreceived user query: #{response.message}"
         branch = "#{branch_root_address}#{response.match[2]}"
         name = response.envelope.user.name
+        console.log "remove_subscribers request for user #{name}. branch to remove: #{branch}"
         
         #get subscriber collection
         collection = db.collection if DEBUG_MODE then "test_subscribers" else "subscribers"
@@ -361,27 +376,36 @@ module.exports = (robot) ->
                 
             #if we did not find a document for the user, they are not subscribed to any builds
             if !doc
+                console.log "#{name} is not subscribed to any branches. quitting."
                 return response.send "You are not subscribed to any branches."
                         
             #we found the user in the database, let's look for the specified branch in their document and remove it
-            subscription_removed = false
+            sub_found = false
             for sub, i in doc.subscriptions
                 if sub == branch
                     #we found the subscription to remove, lets remove it
-                    subscription_removed = true
+                    console.log "found current subscription for #{name} on #{branch} at index #{i}, removing..."
+                    sub_found = true
                     doc.subscriptions.splice i, 1
-                    return false
+                    break
                     
             #if the subscription was removed, we need to update the database
-            if subscription_removed
+            if sub_found
+                console.log "updating #{name}'s subscriptions document in the database."
                 collection.findOneAndReplace { _id: doc._id }, doc, ( err, result ) ->
                     if err
                         console.log "DATABASE ERROR: #{err.message}"
                         return response.send "There was an error with that request, please try again. #{err}"
-                
+                        
+                    if !result.ok
+                        console.log "unsuccessful attempt to update the document. result code: #{result.ok}"
+                        response.send "There was an error with that request, please try again. #{err}."
+                        return
+                    
                     console.log "successfully updated user document in the database."
                     return response.send "You are no longer subscribed to #{branch}."
             else
+                console.log "#{name} is not subscribed to #{branch}. quitting."
                 response.send "You are not subscribed to #{branch}!"
             
         
