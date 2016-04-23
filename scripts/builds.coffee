@@ -28,12 +28,16 @@ module.exports = (robot) ->
     
     #behave like static variables
     mongourl = "mongodb://localhost:27017/mobbot"
-    branch_root_address = "rs1_onecore_stacksp_mobcon_"
+    stacksp_root_address = "rs1_onecore_stacksp"
+    mobcon_root_address = "#{stacksp_root_address}_mobcon"
     windowsbuild_root_address = "http://windowsbuild/status/"
-    windowsbuild_branch_address = "Builds.aspx?buildquery=#{branch_root_address}"
+    windowsbuild_branch_address = "Builds.aspx?buildquery="
     windowsbuild_status_address = "Timebuilds.aspx?buildguid="
-    windowsbuild_official_build_owner = "wincbld"
-    #TODO buildsvc_root_address = "http://buildsvc/BuildDetails.aspx?guid=" #interestingly, the GUIDs are unique to the site
+    
+    class BranchId
+        constructor: (short_name, full_name) ->
+            @short_name = short_name
+            @full_name = full_name
     
     class BuildQuery
         constructor: (response, branch, count, callback) ->
@@ -50,13 +54,14 @@ module.exports = (robot) ->
             @restarts = restarts
             
     class BuildIdentity
-        constructor: (branch, build_id, date, guid, owner, web_address = "") ->
+        constructor: (branch, build_id, date, guid, owner, is_official, web_address = "") ->
             @branch = branch
+            @branch_short_name = branch
             @build_id = build_id
             @date = date
             @guid = guid
             @owner = owner
-            @is_official = owner == windowsbuild_official_build_owner
+            @is_official = is_official
             @web_address = web_address
             @fetched = false
             @complete = false
@@ -67,6 +72,15 @@ module.exports = (robot) ->
             @username = username
             @subscriptions = []
             
+    branch_ids = [
+        new BranchId( "dv1", "#{mobcon_root_address}_dv1" ),
+        new BranchId( "dv2", "#{mobcon_root_address}_dv2" ),
+        new BranchId( "dv3", "#{mobcon_root_address}_dv3" ),
+        new BranchId( "dv4", "#{mobcon_root_address}_dv4" ),
+        new BranchId( "release", "rs1_release" ),
+        new BranchId( "stacksp", stacksp_root_address ),
+        new BranchId( "mobcon", mobcon_root_address )
+    ]
     
     #open the database
     mongo.connect mongourl, ( err, database ) ->
@@ -84,6 +98,13 @@ module.exports = (robot) ->
     }
     
     fetch_builds = (query) ->
+        #detect branch short names and expand to the full name
+        for id, i in branch_ids
+            if query.branch == id.short_name
+                console.log "short name #{id.short_name} was specified in user query. expanding to #{id.full_name}"
+                query.branch = id.full_name
+                break
+    
         web_address = "#{windowsbuild_root_address}#{windowsbuild_branch_address}#{query.branch}"
         web_address = $DEBUG.builds_path if DEBUG_MODE
         
@@ -110,9 +131,14 @@ module.exports = (robot) ->
             query.build_identities = []
             rows.each (i) ->
                 elements = _$( this ).find "td"
+                
+                #check if this is an official build
+                official = _$( elements[4] ).text() == "Official"
+                return true if !official                                                    #TODO - change this to support query for specific user
+                
                 full_label = _$( elements[0] ).text()
                 timebuild_html = _$( elements[1] ).html()
-                label_regex = /(\d{5}\.\d{4})\.(.+)\.(\d{6}\-\d{4})/
+                label_regex = /(\d+\.\d+)\.(.+)\.(\d+\-\d+)/
                 label_matches = label_regex.exec full_label
                 
                 build_id = label_matches[1]
@@ -120,9 +146,9 @@ module.exports = (robot) ->
                 date = label_matches[3]
                 guid = timebuild_html.match /.{8}\-.{4}\-.{4}\-.{4}\-.{12}/
                 owner = _$( elements[3] ).text()
-                build = new BuildIdentity branch, build_id, date, guid, owner
-                query.build_identities.push build if build.is_official
-                query.build_identities.length != num_to_fetch
+                build = new BuildIdentity branch, build_id, date, guid, owner, official
+                query.build_identities.push build if build.is_official                      #this will always be true until we support query for specific user
+                return query.build_identities.length != num_to_fetch
                 
             if query.build_identities.length < 1
                 query.response.send "Unable to locate any builds with the specified owner. :("
@@ -295,15 +321,15 @@ module.exports = (robot) ->
     perform_user_query = ( response ) ->
         console.log "\nreceived user query: #{response.message}"
         branch = response.match[1]
-        count = if response.match[2] then parseInt response.match[2] else 1
-        console.log "Fetching official builds for #{branch}"
+        count = if response.match[3] then parseInt response.match[3] else 1
+        console.log "Fetching #{count} official builds for #{branch}"
         response.send "Fetching official builds for #{branch}"
         fetch_builds new BuildQuery response, branch, count, print_results
         
         
     add_subscribers = ( response ) ->
         console.log "\nreceived user query: #{response.message}"
-        branch = "#{branch_root_address}#{response.match[2]}"
+        branch = "#{mobcon_root_address}#{response.match[2]}"
         name = response.envelope.user.name
         console.log "add_subscribers request for user: #{name}. branch to add: #{branch}"
         
@@ -361,7 +387,7 @@ module.exports = (robot) ->
         
     remove_subscribers = ( response ) ->
         console.log "\nreceived user query: #{response.message}"
-        branch = "#{branch_root_address}#{response.match[2]}"
+        branch = "#{mobcon_root_address}#{response.match[2]}"
         name = response.envelope.user.name
         console.log "remove_subscribers request for user #{name}. branch to remove: #{branch}"
         
@@ -415,8 +441,8 @@ module.exports = (robot) ->
         fetch_builds new BuildQuery $DEBUG, "dv1", 1, check_for_state_change
     else
         #respond to direct queries in channel or DM
-        robot.hear /^builds?\s?(.{2}\d)\s?(\d*){1}/i, perform_user_query
-        robot.respond /builds?\s?(.{2}\d)\s?(\d*){1}/i, perform_user_query
+        robot.hear /^builds?\s+([a-zA-Z_0-9]+)(\s+(\d*))?/i, perform_user_query
+        robot.respond /builds?\s+([a-zA-Z_0-9]+)(\s+(\d*))?/i, perform_user_query
         
         #add subscribers to a branch
         robot.hear /^builds?\s(subscribe|-s)\s(.{2}\d)/i, add_subscribers
