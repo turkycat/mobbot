@@ -12,6 +12,18 @@ has, etc!
 [hubot]: http://hubot.github.com
 [generator-hubot]: https://github.com/github/generator-hubot
 
+# Fix 'last pong too old' message
+
+This repo depends on [node-slack-client](https://github.com/slackhq/node-slack-client) which, when loaded, calls `setInterval` to ping the logger every 5 seconds. If the logger does not respond with a 'pong' within 10 seconds, it will close the connection. This can be a problem if a script is executing and taking longer than 10 seconds (ie- multiple web calls) to complete.
+
+seek out the following file:
+`.\node_modules\slack-client\src\client.js`
+
+do a `ctrl+f` for `_pongTimeout` in the `Client.prototype.connect` function.
+
+and edit this line:
+`if ((_this._lastPong != null) && Date.now() - _this._lastPong > 100000) {`
+
 ### Running mobbot Locally
 
 You can test your hubot by running the following, however some plugins will not

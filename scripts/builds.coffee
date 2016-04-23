@@ -13,14 +13,21 @@
 DEBUG_MODE = false
 $DEBUG = null
 if DEBUG_MODE
-    $DEBUG = require "../test_files/dbgbot"
-    $DEBUG.builds_path = "../test_files/builds.txt"
-    $DEBUG.status_path = "../test_files/buildstatus.txt"
+    $DEBUG = require "/home/pi/git/mobbot/test_files/dbgbot"
+    $DEBUG.builds_path = "/home/pi/git/mobbot/test_files/builds.txt"
+    $DEBUG.status_path = "/home/pi/git/mobbot/test_files/buildstatus.txt"
 
 module.exports = (robot) ->
     
+    #load modules
     jsdom = require "jsdom"
     $ = require "jquery"
+    mongo = require "mongodb"
+    .MongoClient
+    db = null
+    
+    #behave like static variables
+    mongourl = "mongodb://localhost:27017/mobbot"
     branch_root_address = "rs1_onecore_stacksp_mobcon_"
     windowsbuild_root_address = "http://windowsbuild/status/"
     windowsbuild_branch_address = "Builds.aspx?buildquery=#{branch_root_address}"
@@ -41,21 +48,10 @@ module.exports = (robot) ->
             @flavor = flavor
             @status = status
             @restarts = restarts
-            @pattern = {
-                text: ""
-                #fallback: "Attachment fallback"
-                color: ""
-                fields: [{
-                    title: "Status"
-                    value: ""
-                },{
-                    title: "Restarts"
-                    value: ""
-                }]
-            }
             
     class BuildIdentity
-        constructor: (build_id, date, guid, owner, web_address = "") ->
+        constructor: (branch, build_id, date, guid, owner, web_address = "") ->
+            @branch = branch
             @build_id = build_id
             @date = date
             @guid = guid
@@ -63,7 +59,29 @@ module.exports = (robot) ->
             @is_official = owner == windowsbuild_official_build_owner
             @web_address = web_address
             @fetched = false
+            @complete = false
             @status = []
+            
+    class SlackUser
+        constructor: (username) ->
+            @username = username
+            @subscriptions = []
+            
+    
+    #open the database
+    mongo.connect mongourl, ( err, database ) ->
+        if err
+            console.log "DATABASE ERROR: #{err.message}"
+            return
+        
+        db = database
+        console.log "database connection opened."
+        
+
+    response_logger = {
+        send: ( message ) ->
+            console.log message
+    }
     
     fetch_builds = (query) ->
         web_address = "#{windowsbuild_root_address}#{windowsbuild_branch_address}#{query.branch}"
@@ -94,12 +112,15 @@ module.exports = (robot) ->
                 elements = _$( this ).find "td"
                 full_label = _$( elements[0] ).text()
                 timebuild_html = _$( elements[1] ).html()
+                label_regex = /(\d{5}\.\d{4})\.(.+)\.(\d{6}\-\d{4})/
+                label_matches = label_regex.exec full_label
                 
-                build_id = full_label.match /\d{5}\.\d{4}/
-                date = full_label.match /\d{6}\-\d{4}/
+                build_id = label_matches[1]
+                branch = label_matches[2]
+                date = label_matches[3]
                 guid = timebuild_html.match /.{8}\-.{4}\-.{4}\-.{4}\-.{12}/
                 owner = _$( elements[3] ).text()
-                build = new BuildIdentity build_id, date, guid, owner
+                build = new BuildIdentity branch, build_id, date, guid, owner
                 query.build_identities.push build if build.is_official
                 query.build_identities.length != num_to_fetch
                 
@@ -113,7 +134,7 @@ module.exports = (robot) ->
         [0..query.build_identities.length - 1].map (i) ->
             web_address = "#{windowsbuild_root_address}#{windowsbuild_status_address}#{query.build_identities[i].guid}"
             query.build_identities[i].web_address = web_address
-            web_address = $DEBUG.guid_path if DEBUG_MODE
+            web_address = $DEBUG.status_path if DEBUG_MODE
             
             robot.http(web_address)
                 .get() (err, res, body) ->
@@ -137,11 +158,6 @@ module.exports = (robot) ->
                 status = _$( this ).children().eq(2).text()
                 restarts = _$( this ).children().eq(4).text()
                 build_status = new BuildStatus flavor, status, restarts
-                switch status
-                    when "Started" then build_status.color = "#ffff66"
-                    when "Failed" then build_status.color = "#ff3333"
-                    else build_status.color = "#36a64f"
-                
                 query.build_identities[i].status.push build_status
                 
             query.build_identities[i].fetched = true
@@ -165,29 +181,259 @@ module.exports = (robot) ->
     
     
     check_for_state_change = (query) ->
-        #TODO
-        #build_report_content[j].text = table_elements[1]
-        #build_report_content[j].fields[0].value = table_elements[3]
-        #build_report_content[j].fields[1].value = table_elements[5]
+    
+        #check and possibly update the stored values for the retrieved builds
+        collection = db.collection if DEBUG_MODE then "test_builds" else "builds"
         
-        #build_report_content[j].color = "#ffff66" if table_elements[3] == "Started"
-        #build_report_content[j].color = "#ff3333" if table_elements[3] == "Failed"
+        #go through each build identity retrieved and try to find it in the database by guid
+        for identity in query.build_identities                
+            collection.findOne { "guid": identity.guid }, {}, ( err, doc ) ->
+                if err
+                    console.log "DATABASE ERROR: #{err.message}"
+                    return
+                    
+                #if the returned doc is null, the database does not have an entry for this identity. Add it!
+                if !doc
+                    return collection.insert identity, ( err, result ) ->
+                        if err
+                            console.log "DATABASE ERROR: #{err.message}"
+                            return
+                            
+                        if result.result.n == 1
+                            console.log "inserted a new build into the database collection"
+                        else
+                            console.log "there was a problem inserting a new build into the database"
+                    
+                #determine if this build is already complete
+                if doc.complete
+                    console.log "all builds for #{query.branch} have stopped. skipping update check"
+                    return
+                
+                #iterate through the statuses on the returned document looking for changes and completeness
+                update_needed = doc.status.length != identity.status.length     #update needed if new builds have started
+                complete = !update_needed                                       #default value is usually true, but will be false if new builds have started
+                for doc_status, i in doc.status
+                    if identity.status[i].status == "Started" || identity.status[i].status == "Failed"
+                        complete = false
+                        
+                    if doc_status.status != identity.status[i].status
+                        update_needed = true
+                        emit_state_change doc, doc_status, identity.status[i]
+                
+                #update the database if necessary
+                if update_needed
+                    identity.complete = complete
+                    collection.findOneAndReplace { _id: doc._id }, identity, ( err, result ) ->
+                        if err
+                            console.log "DATABASE ERROR: #{err.message}"
+                            return
+                            
+                        console.log "updated changed document in database"
+                else
+                    console.log "No build statuses have changed for #{query.branch}"
+            
+            
+    emit_state_change = ( identity_document, old_status, new_status ) ->
+        console.log "status for #{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}:#{new_status.flavor} changed from #{old_status.status} to #{new_status.status}"
+       
+        #slice off the last bit of the branch name for cleaner messages
+        branch_regex = /.*_(.+)$/i
+        branch_matches = branch_regex.exec identity_document.branch
+        branch_short_name = branch_matches[1]
         
-        #robot.emit 'slack.attachment',
-        #    message: botres.message
-        #    content: build_report_content
-        #    channel: botres.message.room
+        pattern = {
+            pretext: "Status update for #{branch_short_name}"
+            fallback: ""
+            text: ""
+            color: "warning"
+            author_name: "Build #{new_status.status}"
+            title: "#{identity_document.build_id}.#{identity_document.branch}.#{identity_document.date}",
+            text: "#{new_status.flavor}",
+            title_link: "#{identity_document.web_address}"
+        }
+
+        #customize some of the fields based on what is being sent
+        #fallback text is what is displayed on any notifications that go out for this message    
+        if new_status.status == "Failed"
+            pattern.fallback = "Oh no! #{new_status.flavor} build failed for #{branch_short_name}."
+            pattern.color = "danger"
+        else if new_status.status == "Completed"
+            pattern.fallback = "#{new_status.flavor} build complete for #{branch_short_name}!"
+            pattern.color = "good"
+        else if new_status.status == "Started" && old_status.status == "Failed"
+            pattern.fallback = "#{new_status.flavor} build resumed for #{branch_short_name}."
+            pattern.author_name = "Build resumed"
+        else
+            pattern.fallback = "An update to one of today's builds has been posted to Slack."
+        
+        #emit a message to the appropriate slack channel if the status is failed or complete
+        if new_status.status != "Cancelled"
+            console.log "build for #{branch_short_name} has failed, completed, or has been resumed. Emitting message to Slack channel."
+            
+            robot.emit 'slack.attachment', {
+                message: robot.message
+                content: pattern
+                channel: "#build-breaks"
+            }
+            
+        collection = db.collection if DEBUG_MODE then "test_subscribers" else "subscribers"
+        collection.find( { subscriptions: identity_document.branch } ).toArray ( err, docs ) ->
+            if err 
+                return console.log "DATABASE ERROR: #{err.message}"
+                
+            if docs
+                console.log "found subscribers for #{identity_document.branch}, sending direct messages..."
+                for doc in docs
+                    robot.emit 'slack.attachment', {
+                        message: robot.message
+                        content: pattern
+                        channel: doc.username
+                    }
+                
+            
+        
+    perform_user_query = ( response ) ->
+        console.log "\nreceived user query: #{response.message}"
+        branch = response.match[1]
+        count = if response.match[2] then parseInt response.match[2] else 1
+        console.log "Fetching official builds for #{branch}"
+        response.send "Fetching official builds for #{branch}"
+        fetch_builds new BuildQuery response, branch, count, print_results
+        
+        
+    add_subscribers = ( response ) ->
+        console.log "\nreceived user query: #{response.message}"
+        branch = "#{branch_root_address}#{response.match[2]}"
+        name = response.envelope.user.name
+        console.log "add_subscribers request for user: #{name}. branch to add: #{branch}"
+        
+        #get subscriber collection
+        collection = db.collection if DEBUG_MODE then "test_subscribers" else "subscribers"
+        
+        #attempt to retrieve the user document from the collection
+        collection.findOne { username: name }, ( err, doc ) ->
+            if err
+                console.log "DATABASE ERROR: #{err.message}"
+                return response.send "There was an error with that request, please try again. #{err}"
+                
+            #if we did not find a document for the user and they are subscribing to a build, add them to the collection
+            if !doc
+                console.log "#{name} is not subscribed to any branches. adding a new subscription document."
+                user = new SlackUser name
+                user.subscriptions.push branch
+                return collection.insertOne user, ( err, result ) ->
+                    if err
+                        console.log "DATABASE ERROR: #{err.message}"
+                        return response.send "There was an error with that request, please try again. #{err}"
+                        
+                    if result.result.n == 1
+                        console.log "successfully added user document for #{name} to the database."
+                        return response.send "Success! You are now personally subscribed to status changes for #{branch}. I will send you a direct message when build statuses change."
+                        
+            #we found the user in the database, let's double check that they aren't already subscribed
+            sub_found = false
+            for sub, i in doc.subscriptions
+                if sub == branch
+                    sub_found = true
+                    console.log "#{name} is already subscribed to #{branch}. quitting."
+                    response.send "You are already subscribed to #{branch}!"
+                    break
+                    
+            #if the user is not already subscribed to this branch, we will add it and update the database
+            if !sub_found
+                console.log "updating database document for #{name} to add a new subscription to #{branch}"
+                doc.subscriptions.push branch
+                
+                collection.findOneAndReplace { _id: doc._id }, doc, ( err, result ) ->
+                    if err
+                        console.log "DATABASE ERROR: #{err.message}"
+                        response.send "There was an error with that request, please try again. #{err}."
+                        return
+                        
+                    if !result.ok
+                        console.log "unsuccessful attempt to update the document. result code: #{result.ok}"
+                        response.send "There was an error with that request, please try again. #{err}."
+                        return
+                    
+                    response.send "Success! You are now personally subscribed to #{doc.subscriptions.length} branches."
+                    return console.log "successfully updated user document in the database."
+        
+        
+    remove_subscribers = ( response ) ->
+        console.log "\nreceived user query: #{response.message}"
+        branch = "#{branch_root_address}#{response.match[2]}"
+        name = response.envelope.user.name
+        console.log "remove_subscribers request for user #{name}. branch to remove: #{branch}"
+        
+        #get subscriber collection
+        collection = db.collection if DEBUG_MODE then "test_subscribers" else "subscribers"
+        
+        #attempt to retrieve the user document from the collection
+        collection.findOne { username: name }, ( err, doc ) ->
+            if err
+                console.log "DATABASE ERROR: #{err.message}"
+                return response.send "There was an error with that request, please try again. #{err}"
+                
+            #if we did not find a document for the user, they are not subscribed to any builds
+            if !doc
+                console.log "#{name} is not subscribed to any branches. quitting."
+                return response.send "You are not subscribed to any branches."
+                        
+            #we found the user in the database, let's look for the specified branch in their document and remove it
+            sub_found = false
+            for sub, i in doc.subscriptions
+                if sub == branch
+                    #we found the subscription to remove, lets remove it
+                    console.log "found current subscription for #{name} on #{branch} at index #{i}, removing..."
+                    sub_found = true
+                    doc.subscriptions.splice i, 1
+                    break
+                    
+            #if the subscription was removed, we need to update the database
+            if sub_found
+                console.log "updating #{name}'s subscriptions document in the database."
+                collection.findOneAndReplace { _id: doc._id }, doc, ( err, result ) ->
+                    if err
+                        console.log "DATABASE ERROR: #{err.message}"
+                        return response.send "There was an error with that request, please try again. #{err}"
+                        
+                    if !result.ok
+                        console.log "unsuccessful attempt to update the document. result code: #{result.ok}"
+                        response.send "There was an error with that request, please try again. #{err}."
+                        return
+                    
+                    console.log "successfully updated user document in the database."
+                    return response.send "You are no longer subscribed to #{branch}."
+            else
+                console.log "#{name} is not subscribed to #{branch}. quitting."
+                response.send "You are not subscribed to #{branch}!"
+            
         
     
     if DEBUG_MODE
         $DEBUG.send "Fetching builds from file"
-        fetch_builds new BuildQuery $DEBUG, "dv1", 1, print_results
+        fetch_builds new BuildQuery $DEBUG, "dv1", 1, check_for_state_change
     else
-        robot.hear /^builds? ?(.{2}\d) ?(\d*){1}/i, (response) ->
-            branch = response.match[1]
-            count = if response.match[2] then parseInt response.match[2] else 1
-            response.send "Fetching official builds for #{branch}"
-            fetch_builds new BuildQuery response, branch, count, print_results
+        #respond to direct queries in channel or DM
+        robot.hear /^builds?\s?(.{2}\d)\s?(\d*){1}/i, perform_user_query
+        robot.respond /builds?\s?(.{2}\d)\s?(\d*){1}/i, perform_user_query
+        
+        #add subscribers to a branch
+        robot.hear /^builds?\s(subscribe|-s)\s(.{2}\d)/i, add_subscribers
+        robot.respond /builds?\s(subscribe|-s)\s(.{2}\d)/i, add_subscribers
+        
+        #remove subscribers from a branch
+        robot.hear /^builds?\s(unsubscribe|-u)\s(.{2}\d)/i, remove_subscribers
+        robot.respond /builds?\s(unsubscribe|-u)\s(.{2}\d)/i, remove_subscribers
+
+        #set an interval to periodically check for build updates on all branches
+        setInterval () ->
+            console.log "Interval elapsed. Checking build statuses for changes."
+            fetch_builds new BuildQuery response_logger, "dv1", 1, check_for_state_change
+            fetch_builds new BuildQuery response_logger, "dv2", 1, check_for_state_change
+            fetch_builds new BuildQuery response_logger, "dv3", 1, check_for_state_change
+            fetch_builds new BuildQuery response_logger, "dv4", 1, check_for_state_change
+        , 120000
 
 #invoke the function we just set to module.exports with the $DEBUG object as the robot param
 if DEBUG_MODE

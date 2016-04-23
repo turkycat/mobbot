@@ -5,3 +5,5 @@ log.txt
 *.swp
 *.js
 test_files/*.txt
+data/*
+logs/*
